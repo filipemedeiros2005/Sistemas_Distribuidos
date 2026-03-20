@@ -7,6 +7,13 @@
   - **Gateway**: Agregação e pré-processamento de dados.
   - **Servidor**: Armazenamento e análise centralizada.
 
+## Convenções e Regras Adotadas
+
+Para manter a integridade do código, seguimos uma convenção de nomes baseada em pastas virtuais:
+- `tpX/faseY/docs`: Documentação técnica da fase específica.
+- `tpX/faseY/implementacao`: Código fonte e testes de funcionalidade.
+> *Nota: O uso da "/" permite uma visualização organizada por pastas nos IDEs (Vs2022, VSCode, Rider, etc.).*
+
 ## Stack Tecnológica
 
 - **Linguagem Principal**: C# (.NET 9.0)
