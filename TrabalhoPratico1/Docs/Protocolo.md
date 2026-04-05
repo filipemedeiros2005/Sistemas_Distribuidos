@@ -1,18 +1,18 @@
-# Especificação Técnica do Protocolo - Fase 1
+# Especificação Técnica do Protocolo - Fase 1 (*OneHealth*)
 
 Este documento define o protocolo de comunicação binária para o sistema de monitorização "One Health".
 ## 1. Estrutura do Pacote (16 Bytes)
 
 Para otimizar o ciclo de leitura da CPU e evitar o custo de processamento de dados desalinhados, as mensagens seguem uma estrutura fixa de 16 bytes.
 
-| Offset | Campo | Tamanho | Tipo | Descrição |
-| :--- | :--- | :---: | :--- | :--- |
-| 0 | `MsgType` | 1 Byte | uint8 | Tipo de ação (1:HELO, 2:DATA, 3:ACK, 4:BYE) |
+| Offset | Campo | Tamanho | Tipo | Descrição                                     |
+| :--- | :--- | :---: | :--- |:----------------------------------------------|
+| 0 | `MsgType` | 1 Byte | uint8 | Tipo de ação (1:HELO, 2:DATA, 3:ACK, 4:BYE, 5:NACK) |
 | 1 | `DataType` | 1 Byte | uint8 | Tipo de sensor (1:PM10, 2:PPM, 3:Temp, 4:Hum) |
-| 2 | `Reserved` | 2 Bytes | - | Padding para alinhamento a 4 bytes |
-| 4 | `SensorID` | 4 Bytes | uint32 | Identificador único do Sensor |
-| 8 | `Value` | 4 Bytes | float32 | Valor da medição (formato IEEE 754) |
-| 12 | `CheckSum`| 4 Bytes | uint32 | Verificação de integridade ou uso futuro |
+| 2 | `Reserved` | 2 Bytes | - | Padding para alinhamento a 4 bytes            |
+| 4 | `SensorID` | 4 Bytes | uint32 | Identificador único do Sensor                 |
+| 8 | `Value` | 4 Bytes | float32 | Valor da medição (formato IEEE 754)           |
+| 12 | `CheckSum`| 4 Bytes | uint32 | Verificação de integridade ou uso futuro      | 
 
 ## 2. Fluxo de Comunicação
 
