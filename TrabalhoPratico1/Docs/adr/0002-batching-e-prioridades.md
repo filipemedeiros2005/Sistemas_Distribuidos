@@ -1,13 +1,13 @@
-# ADR 002: Gestão de Concorrência e Persistência
+# ADR 002: Sincronização e Persistência Concorrente
+**Estatuto**: Aceite
+**Data**: 2026-04-05
 
-**ID:** 0002
+## Contexto
+O Servidor Central receberá pacotes provenientes de múltiplos Gateways simultaneamente. A gravação assíncrona concorrente no mesmo ficheiro CSV resultará em corrupção do documento, escrita sobreposta de bytes ou exceções do sistema operativo (File In Use).
 
-**Estatuto:** Aceite
+## Decisão
+Implementar mecanismos de exclusão mútua através de objetos System.Threading.Mutex. As worker threads do servidor devem adquirir o bloqueio global antes de realizarem operações de I/O em disco e garantir a sua libertação em blocos de tratamento de exceções (finally).
 
-**Contexto:** Na Fase 4, o Gateway e o Servidor processarão múltiplos sensores simultaneamente. Se duas threads tentarem escrever no ficheiro de log ou ler o sensors_config.csv ao mesmo tempo, ocorrerá uma exceção de I/O ou corrupção de dados.
-
-**Decisão:** Utilização de Mutexes (`System.Threading.Mutex`) para garantir exclusão mútua no acesso aos ficheiros físicos.
-
-**Justificação:** Ao contrário de um simples lock (que funciona apenas dentro do mesmo processo), o Mutex é um objeto do sistema operativo que permite maior robustez, sendo a solução clássica em Sistemas Distribuídos para proteger recursos partilhados.
-
-**Consequências:** Pequeno custo de *performance* devido à espera de threads, garantindo em troca a integridade total dos dados.
+## Consequências
+* **Positivas**: Prevenção absoluta contra race conditions na camada de persistência física.
+* **Negativas**: Causa constrangimento de performance (thread contention) em momentos de grande afluência de dados, criando um funil obrigatório na escrita.

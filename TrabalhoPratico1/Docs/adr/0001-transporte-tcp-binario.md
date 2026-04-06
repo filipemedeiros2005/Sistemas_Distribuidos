@@ -1,22 +1,15 @@
-# ADR 001: Seleção de Protocolo e Camada de Transporte
+# ADR 001: Protocolo Binário de Comunicação e Transporte TCP
+**Estatuto**: Aceite
+**Data**: 2026-04-05
 
-**ID:** 0001
+## Contexto
+A infraestrutura exige a recolha contínua de dados ambientais críticos. A perda de pacotes ou desordenação na rede invalida a análise epidemiológica. Sensores possuem restrições de processamento, tornando formatos baseados em texto (JSON/XML) ineficientes devido ao overhead de parsing.
 
-**Estatuto:** Aceite
+## Decisão
+1. Adotar Sockets TCP para garantir entrega e ordenação sem necessidade de controlo de fluxo na camada aplicacional.
+2. Definir um protocolo proprietário binário de tamanho fixo de 16 bytes.
+3. Incorporar 2 bytes de padding (Reserved) no Offset 2 para forçar o alinhamento de memória do campo SensorID a múltiplos de 4, otimizando ciclos de fetch na CPU.
 
-**Contexto:** O sistema necessita de uma comunicação entre Sensores, Gateway e Servidor. Os dados (saúde pública) são sensíveis à perda de pacotes e à corrupção de mensagens. A eficiência em dispositivos limitados é prioritária.
-
-**Decisão:**
-- Utilizar TCP (Sockets) em vez de UDP para garantir a entrega e ordenação.
-- Implementar um Protocolo Binário de 16 Bytes com alinhamento forçado.
-- Usar campos de *checksum* para verificar a integridade dos dados.
-- Adicionar a possibilidade de retornar *NACK* no campo de *MsgType*.
-
-**Justificação:**
-- O TCP elimina a necessidade de lógica complexa de retransmissão na camada de aplicação.
-- Os 16 bytes ($2^4$) permitem leituras atómicas em arquiteturas de 64 bits (como ARM64/x64), reduzindo ciclos de CPU no processamento de milhares de pacotes.
-- O *NACK* permite diferenciar a possibilidade do gateway rejeitar o sensor pela Firewall da possibilidade de não existir conexão de rede.
-
-**Consequências:**
-- Necessidade de gerir o estado da conexão (Handshake).
-- Ligeiro aumento de latência inicial devido ao three-way handshake do TCP, compensado pela fiabilidade.
+## Consequências
+* **Positivas**: Máxima eficiência de rede e alinhamento perfeito de memória nas estruturas C#.
+* **Negativas**: O pacote estruturado rigidamente em 16 bytes requer a emissão de uma nova versão do protocolo caso a estrutura de dados precise de evoluir.
