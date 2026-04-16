@@ -13,29 +13,26 @@ namespace OneHealth.Common
 
         public byte[] ToBytes()
         {
-            int size = Marshal.SizeOf(this);
-            byte[] arr = new byte[size];
-            IntPtr ptr = Marshal.AllocHGlobal(size);
-
-            Marshal.StructureToPtr(this, ptr, true);
-            Marshal.Copy(ptr, arr, 0, size);
-            Marshal.FreeHGlobal(ptr);
-
+            byte[] arr = new byte[16];
+            Span<byte> span = arr;
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(span.Slice(0, 4), SensorID);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(span.Slice(4, 4), TimeStamp);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(span.Slice(8, 4), SequenceNum);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(span.Slice(12, 4), DataSize);
             return arr;
         }
 
-        [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "AOT compilation is not required for this component")]
         public static VideoPacketHeader FromBytes(byte[] arr)
         {
-            VideoPacketHeader packet = new VideoPacketHeader();
-            int size = Marshal.SizeOf(packet);
-            IntPtr ptr = Marshal.AllocHGlobal(size);
-
-            Marshal.Copy(arr, 0, ptr, size);
-            packet = Marshal.PtrToStructure<VideoPacketHeader>(ptr);
-            Marshal.FreeHGlobal(ptr);
-
-            return packet;
+            if (arr.Length < 16) throw new ArgumentException("Array too short");
+            Span<byte> span = arr;
+            return new VideoPacketHeader
+            {
+                SensorID = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(span.Slice(0, 4)),
+                TimeStamp = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(span.Slice(4, 4)),
+                SequenceNum = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(span.Slice(8, 4)),
+                DataSize = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(span.Slice(12, 4))
+            };
         }
     }
 }
