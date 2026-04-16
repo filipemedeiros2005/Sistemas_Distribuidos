@@ -1,16 +1,13 @@
-# ADR 005: Canal Duplo de Tráfego e Multiplexagem de Prioridade
+# ADR 005: Arquitetura de Fila de Prioridade no Gateway (QoS)
 **Estatuto**: Aceite
-**Data**: 2026-04-05
 
 ## Contexto
-Durante períodos em que diversos sensores esvaziam os seus buffers de rotina em simultâneo para o Gateway, um alerta crítico (MsgType 6) não pode aguardar numa fila FIFO convencional.
+Na função de agregação (Fase 3), o Gateway atua como multiplexador. Em picos de receção de rotina, um alerta não deve esperar numa fila FIFO tradicional.
 
 ## Decisão
-O mecanismo de roteamento do Gateway será construído sobre uma PriorityQueue. 
-1. Pacotes de MsgType 2 (DATA) são classificados com prioridade secundária.
-2. Pacotes MsgType 6 (ALERT) recebem prioridade máxima. 
-A thread despachante processa o topo da heap matemática da fila, garantindo que as emergências são drenadas para o Servidor Central antes da rotina estagnada.
+Utilizar a estrutura `PriorityQueue` no Gateway.
+Pacotes de rotina assumem prioridade secundária, enquanto pacotes marcados como `6:ALERT` adquirem prioridade máxima na *heap* da estrutura, passando para a frente da fila de envio, independentemente de terem chegado depois dos dados de rotina. O Gateway nunca destrói o contexto de rotina no seu próprio buffer.
 
 ## Consequências
-* **Positivas**: Qualidade de Serviço (QoS) rígida que evita a estagnação de alertas vitais.
-* **Negativas**: Inversão forçada da linha cronológica natural de eventos recebidos pela rede, favorecendo a tipologia em detrimento da ordem temporal estrita.
+* **Positivas**: Implementação de Qualidade de Serviço (QoS), priorizando a segurança pública.
+* **Negativas**: O envio cronológico rede-abaixo perde-se ligeiramente. É por este motivo que o Timestamp gerado no ADR 001 é crucial para a reordenação no lado do Servidor.

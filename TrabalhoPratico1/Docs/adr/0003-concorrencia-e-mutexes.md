@@ -1,16 +1,13 @@
-# ADR 003: Estratégia de Buffering Duplo e Análise Estatística na Borda
+# ADR 003: Avaliação Estatística Baseada em Média Móvel Exponencial (EMA)
 **Estatuto**: Aceite
-**Data**: 2026-04-05
 
 ## Contexto
-Dispositivos IoT esgotam energia ao manter a interface de rede constantemente ativa. É necessário reter dados não essenciais, mas sem comprometer a propagação em tempo real de anomalias que apresentem risco para a saúde pública.
+Os sensores devem avaliar anomalias em tempo real, mitigando o ruído de hardware. Guardar uma matriz com as últimas 50 amostras (*Janela Deslizante*) consome memória contínua nos nós e requer recalibrações pesadas no arranque.
 
 ## Decisão
-A arquitetura interna do Sensor implementará um buffer duplo e cálculo em tempo real:
-1. **Janela Deslizante**: O sensor retém as últimas 50 amostras em memória contínua para computar a média móvel e o desvio-padrão local de forma a isolar o ruído de hardware.
-2. **Buffer de Rotina**: Leituras dentro do padrão são armazenadas num buffer e transmitidas em lotes de 10 pacotes.
-3. **Buffer de Urgência**: Leituras fora da margem de erro disparam o envio de todos os dados residuais de rotina acrescidos do evento de alerta (MsgType 6), via transmissão imediata.
+Substituir a Janela Deslizante pela **Média Móvel Exponencial (EMA)**, atribuindo um fator de suavização $\alpha = 0.1$ (o que equivale matematicamente a uma perspetiva de 19 amostras passadas).
+O Sensor apenas retém em memória 2 variáveis float (`Media` e `Variância`), que são pré-carregadas via um ficheiro simples de calibração de fábrica.
 
 ## Consequências
-* **Positivas**: Reduz transações de rede e preserva o contexto temporal anterior à anomalia (análise forense).
-* **Negativas**: Aumenta a alocação de RAM no nó local e exige um período cego (warm-up phase) até a janela deslizante estabilizar as métricas iniciais.
+* **Positivas**: Memória consumida pelos cálculos estatísticos no sensor passa a ser $O(1)$.
+* **Negativas**: Ajuste subtil à anomalia não é instantâneo (comportamento desejável para evitar falsos positivos).

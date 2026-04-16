@@ -1,13 +1,15 @@
-# ADR 004: Topologia em Estrela Hierárquica e Múltiplos Gateways
+# ADR 004: Buffering de Contexto em Eventos Anómalos (Caixa Negra)
 **Estatuto**: Aceite
-**Data**: 2026-04-05
 
 ## Contexto
-O aumento do número de sensores acarreta esgotamento de portas de conexão num único ponto central. Um Gateway isolado configura um gargalo de processamento e um único ponto de falha global.
+Para poupar energia, o sensor guarda dados num *buffer* rotineiro e envia em lotes de 10. Contudo, se ocorrer um pico crítico ambiental que destrua o hardware logo a seguir, o contexto histórico contido no buffer será perdido (Fase 3: Pré-processamento e encaminhamento).
 
 ## Decisão
-Adotar uma topologia em estrela hierárquica distribuída. O sistema suportará a instanciação de dezenas de Gateways paralelos de forma transparente. Os sensores conectam-se ao Gateway geograficamente mais próximo. O Gateway mantém conexões long-lived (persistentes) limitadas e multiplexadas para o Servidor Central.
+Quando a matemática (EMA) deteta uma anomalia (MsgType 6: ALERT):
+1. O valor crítico não é inserido na fórmula EMA (evitando *baseline poisoning*).
+2. O sensor concatena o buffer de rotina pendente com a medição de urgência.
+3. Este lote especial é enviado instantaneamente pelo Socket TCP (via *flush*), e o buffer local é reiniciado.
 
 ## Consequências
-* **Positivas**: Tolerância a falhas segmentada e distribuição da carga computacional.
-* **Negativas**: Aumenta a dificuldade de rastreabilidade física dos pacotes, uma vez que o Servidor perde a visibilidade do IP original do sensor, confiando apenas no ID encapsulado no payload.
+* **Positivas**: Garante o comportamento de "Caixa Negra", enviando sempre o histórico dos momentos antes do desastre.
+* **Negativas**: Ligeira disrupção no tamanho fixo do lote (um envio pode conter 3, 5 ou 9 pacotes, em vez dos 10 padronizados), obrigando o Gateway a ser flexível na receção.

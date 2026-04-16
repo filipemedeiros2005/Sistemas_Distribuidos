@@ -1,15 +1,13 @@
-# ADR 006: Validação Perimetral e Resposta NACK
+# ADR 006: Validação Perimetral e Base de Dados Central
 **Estatuto**: Aceite
-**Data**: 2026-04-05
 
 ## Contexto
-Sensores físicos são o elo mais vulnerável da rede a nível de intrusão, interceção ou configuração errónea. Submeter o núcleo do sistema a autenticações contínuas destrói a capacidade de processamento útil do Servidor Central.
+O protocolo permite (com valorização extra) que os dados sejam guardados em Base de Dados Relacional. Exige-se ainda controlo do início da comunicação (Handshake).
 
 ## Decisão
-Implementar o isolamento e validação no Gateway (Edge Firewalling).
-1. O Gateway valida o pacote de Handshake (MsgType 1: HELO) contra um documento local sensors_config.csv.
-2. Identidades ausentes ou corrompidas recebem imediatamente uma rejeição formal via pacote MsgType 5: NACK, originando o fecho sumário da socket TCP.
+1. **Borda (Gateway)**: Executa Firewall Lógica. No `1:HELO`, o `SensorID` é verificado contra o ficheiro `sensors_config.csv` do próprio Gateway. Entidades desconhecidas recebem `5:NACK` e o socket é encerrado (evita DoS no Servidor).
+2. **Núcleo (Servidor)**: A persistência ocorrerá em **PostgreSQL**, utilizando uma tabela otimizada para Séries Temporais (*Time-Series*).
 
 ## Consequências
-* **Positivas**: Purga do tráfego não autorizado fora da rede nuclear, blindando o servidor contra injeção de dados piratas.
-* **Negativas**: Introduz a necessidade de espelhar atualizações dos ficheiros de configuração CSV pelos múltiplos Gateways sempre que a infraestrutura física dos sensores é expandida.
+* **Positivas**: Arquitetura profissional pronta para leitura via ferramentas como PowerBI.
+* **Negativas**: Requer a instalação do SGBD PostgreSQL e o *driver* Npgsql no ecossistema do projeto.
