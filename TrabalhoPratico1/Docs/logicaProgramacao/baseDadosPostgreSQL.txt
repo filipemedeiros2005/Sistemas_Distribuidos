@@ -1,0 +1,46 @@
+INICIAR Mutex "Acesso_BD_Global"
+CONECTAR à Base de Dados PostgreSQL
+
+FUNÇÃO ProcessarDadosRecebidos(pacote):
+    // 1. Tratamento de Mensagens de Estado (Novidade)
+    SE pacote.MsgType == 7:
+        TextoStatus = (pacote.Value == 0) ? "OFFLINE" : "ONLINE"
+        BLOQUEAR(Acesso_BD_Global):
+            // SEGURANÇA: Uso de Parâmetros para evitar SQL Injection
+            EXECUTAR_SQL_PARAMETRIZADO(
+                "UPDATE sensores_estado SET status = @status WHERE sensor_id = @id",
+                { "@status": TextoStatus, "@id": pacote.SensorID }
+            )
+        RETORNAR
+
+    // 2. Tratamento de Telemetria (Normal ou Alerta)
+    TipoTexto = TraduzirIdParaNome(pacote.DataType)
+    DataOriginal = ConverterUnixParaTimestamp(pacote.Timestamp)
+    
+    BLOQUEAR(Acesso_BD_Global):
+        TENTAR:
+            // SEGURANÇA: Inserção segura com parâmetros
+            SQL = "INSERT INTO telemetria (sensor_id, tipo, valor, data_leitura, prioritario) 
+                   VALUES (@id, @tipo, @valor, @dt, @prio)"
+            
+            PARAMETROS = {
+                "@id": pacote.SensorID,
+                "@tipo": TipoTexto,
+                "@valor": pacote.Value,
+                "@dt": DataOriginal,
+                "@prio": (pacote.MsgType == 6)
+            }
+            
+            EXECUTAR_SQL_PARAMETRIZADO(SQL, PARAMETROS)
+            
+            SE pacote.MsgType == 6:
+                // Log de alerta rápido para o Dashboard
+                EXECUTAR_SQL_PARAMETRIZADO(
+                    "INSERT INTO alertas_criticos (sensor_id, ts) VALUES (@id, AGORA())",
+                    { "@id": pacote.SensorID }
+                )
+                
+        CAPTURAR ERROS:
+            LOGAR("Erro de integridade: " + erro.Mensagem)
+        FINALMENTE:
+            LIBERTAR(Acesso_BD_Global)

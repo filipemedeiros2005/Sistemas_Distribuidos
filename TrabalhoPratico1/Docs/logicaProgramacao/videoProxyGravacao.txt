@@ -1,0 +1,29 @@
+// ESTRUTURAS
+VARIAVEL BufferCircularRAM = NOVO DICIONARIO<SensorID, ListaFrames>() 
+VARIAVEL EstadoStreaming = NOVO DICIONARIO<SensorID, Booleano>()    
+
+// TAREFA: RECEPTOR UDP 
+FUNÇÃO ProcessarFrameUDP(frame):
+    // 1. Manutenção do Buffer Circular (RAM)
+    BufferCircularRAM[frame.SensorID].Adicionar(frame)
+    SE BufferCircularRAM[frame.SensorID].TempoTotal > 30s:
+        BufferCircularRAM[frame.SensorID].RemoverMaisAntigo()
+
+    // 2. Encaminhamento em Direto (Live Proxy)
+    SE EstadoStreaming[frame.SensorID] == VERDADEIRO:
+        // Reencaminha o frame para o IP do Servidor sem guardar
+        REPASSAR_UDP(SocketServidor, frame)
+
+// TAREFA: GESTOR DE INCIDENTES (Acionado por MsgType 6: ALERT)
+FUNÇÃO IniciarGravacaoEmergencia(sensorID):
+    // Recorte de segurança: 30s pré-anomalia + 120s pós-anomalia
+    Ficheiro = CRIAR_FICHEIRO("S" + sensorID + "_" + TIMESTAMP() + "_ALERT.raw")
+    
+    // Despeja o que está na RAM para o disco
+    Ficheiro.Escrever(BufferCircularRAM[sensorID])
+    
+    // Mantém a gravação ativa pelos próximos 120 segundos
+    EXECUTAR_DURANTE(120s):
+        AoReceberNovoFrame(f): Ficheiro.Escrever(f)
+    
+    FECHAR_FICHEIRO(Ficheiro)

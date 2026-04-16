@@ -1,0 +1,32 @@
+// No arranque do Gateway
+VARIAVEL TabelaAutorizados = NOVO HASHSET<uint>()
+CarregarWhitelist()
+
+FUNÇÃO CarregarWhitelist():
+    Linhas = LER_FICHEIRO("sensors_config.csv")
+    PARA CADA linha EM Linhas:
+        ID = ConverterParaUint32(linha.Split(';')[0])
+        TabelaAutorizados.Adicionar(ID)
+
+// Quando um socket liga-se à Porta 5001 (TCP)
+FUNÇÃO ValidarNovaConexao(socketSensor):
+    TENTAR:
+        // 1. Aguarda o pacote inicial de 20 bytes
+        PacoteHELO = Receber_20_Bytes(socketSensor)
+        
+        SE PacoteHELO.MsgType != 1: // Deve ser obrigatoriamente HELO
+            Enviar_NACK(socketSensor, "Erro: Esperado HELO")
+            FecharSocket(socketSensor)
+            RETORNAR
+
+        // 2. Verificação de Identidade (Firewall)
+        SE TabelaAutorizados.Contem(PacoteHELO.SensorID):
+            Enviar_ACK(socketSensor)
+            // Autorizado: Inicia a thread de gestão de sessão 
+            CriarThreadSessao(socketSensor, PacoteHELO.SensorID)
+        SENÃO:
+            Enviar_NACK(socketSensor, "Erro: Sensor Não Autorizado")
+            FecharSocket(socketSensor)
+            
+    CAPTURAR ERROS:
+        FecharSocket(socketSensor)

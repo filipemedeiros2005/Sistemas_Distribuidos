@@ -1,0 +1,23 @@
+// No Gateway
+VARIAVEL TabelaSaude = NOVO DICIONARIO<SensorID, DateTime>()
+CONSTANTE LIMITE_OFFLINE = 300 // 5 minutos em segundos
+
+// Sempre que o Gateway recebe QUALQUER pacote (TCP ou UDP)
+FUNÇÃO AtualizarPresenca(id):
+    TabelaSaude[id] = AGORA()
+
+// Thread de fundo que corre permanentemente
+FUNÇÃO CicloWatchdog():
+    ENQUANTO Gateway_Ativo:
+        AGORA = OBTER_TEMPO_ATUAL()
+        
+        PARA CADA sensor EM TabelaSaude:
+            SE (AGORA - sensor.Valor) > LIMITE_OFFLINE:
+                // Sensor excedeu o tempo de silêncio
+                Notificacao = NOVO PACOTE(MsgType: 7, Value: 0) // 0 = Inativo
+                EnviarParaServidor(Notificacao)
+                
+                // Remove da tabela para não enviar alertas repetidos
+                TabelaSaude.Remover(sensor.Chave) 
+                
+        Aguardar(30s) // Não precisa de verificar a cada milissegundo

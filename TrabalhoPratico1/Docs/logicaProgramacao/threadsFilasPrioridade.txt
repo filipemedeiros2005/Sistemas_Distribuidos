@@ -1,0 +1,40 @@
+// ESTRUTURAS DE DADOS
+FilaPrioridade = NOVA PriorityQueue<Pacote, GrauPrioridade>()
+// Prioridade 0 = ALERT / STATUS, Prioridade 1 = DATA
+DicionarioStatus = NOVO Dicionário<SensorID, UltimoVisto>()
+
+// RECEÇÃO TCP (Executada por cada Worker Thread de cada Sensor)
+FUNÇÃO AoReceberLoteDoSensor(lote):
+PARA CADA pacote NO lote:
+// Atualiza o estado para o Watchdog
+DicionarioStatus[pacote.SensorID] = OBTER_TEMPO_ATUAL()
+
+        // Define a prioridade na fila global
+        prioridade = (pacote.MsgType == 6 OU pacote.MsgType == 7) ? 0 : 1
+        
+        BLOQUEAR(FilaPrioridade): 
+            FilaPrioridade.Inserir(pacote, prioridade)
+
+// RECEÇÃO UDP (Executada pela Thread de Vídeo)
+FUNÇÃO AoReceberFrameVideoUDP(frame):
+// O Gateway guarda o vídeo localmente (Edge Storage) para não sufocar o servidor
+GravarVideoLocal(frame.SensorID, frame.Conteudo)
+
+    // Se o frame indicar algo crítico, gera uma notificação de status para o servidor
+    SE frame.PossuiMovimento:
+        Notificacao = NOVO PACOTE(MsgType: 7, Value: "VIDEO_ON")
+        BLOQUEAR(FilaPrioridade):
+            FilaPrioridade.Inserir(Notificacao, 0)
+
+// DESPACHANTE (Thread Única para o Servidor)
+FUNÇÃO CicloDeEnvioAoServidor():
+ENQUANTO Gateway_Ativo:
+pacoteParaEnviar = NULO
+BLOQUEAR(FilaPrioridade):
+SE FilaPrioridade.TemDados():
+pacoteParaEnviar = FilaPrioridade.RemoverTopo()
+
+        SE pacoteParaEnviar != NULO:
+            EnviarTCP(SocketServidor, pacoteParaEnviar)
+        SENÃO:
+            Aguardar(10ms)
