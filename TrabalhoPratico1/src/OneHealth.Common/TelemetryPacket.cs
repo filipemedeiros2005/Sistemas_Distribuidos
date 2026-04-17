@@ -1,22 +1,20 @@
+using System;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using System.Diagnostics.CodeAnalysis;
-using OneHealth.Common.Helpers;
 
 namespace OneHealth.Common
 {
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct TelemetryPacket
     {
-        public MsgType MsgType;     // Offset 0
-        public DataType DataType;   // Offset 1
-        public ushort Reserved;     // Offset 2 (Padding to align)
-        public uint SensorID;       // Offset 4
-        public uint TimeStamp;      // Offset 8
-        public float Value;         // Offset 12
-        public uint CheckSum;       // Offset 16
+        public MsgType MsgType;     // 1 Byte
+        public DataType DataType;   // 1 Byte
+        public ushort Reserved;     // 2 Bytes
+        public uint SensorID;       // 4 Bytes
+        public uint TimeStamp;      // 4 Bytes
+        public float Value;         // 4 Bytes
+        public uint CheckSum;       // 4 Bytes
 
-        // Utils for bytes conversion using BinaryPrimitives for Big-Endian compliance
         public byte[] ToBytes()
         {
             byte[] arr = new byte[20];
@@ -35,7 +33,7 @@ namespace OneHealth.Common
 
         public static TelemetryPacket FromBytes(byte[] arr)
         {
-            if (arr.Length < 20) throw new ArgumentException("Array too short");
+            if (arr.Length < 20) throw new ArgumentException("Array < 20 bytes");
             Span<byte> span = arr;
 
             return new TelemetryPacket
@@ -52,24 +50,33 @@ namespace OneHealth.Common
 
         public void CalculateAndSetChecksum()
         {
-            this.CheckSum = 0; // zero before
-            byte[] rawBytes = ToBytes();
-            
-            // CRC over the first 16 bytes
+            this.CheckSum = 0;
             byte[] dataRegion = new byte[16];
-            Array.Copy(rawBytes, 0, dataRegion, 0, 16);
-            
-            this.CheckSum = Crc32Algorithm.Compute(dataRegion);
+            Array.Copy(ToBytes(), 0, dataRegion, 0, 16);
+            this.CheckSum = ComputeCRC32(dataRegion);
         }
 
         public bool IsValid()
         {
-            byte[] rawBytes = ToBytes();
             byte[] dataRegion = new byte[16];
-            Array.Copy(rawBytes, 0, dataRegion, 0, 16);
-            
-            uint computedCrc = Crc32Algorithm.Compute(dataRegion);
-            return computedCrc == this.CheckSum;
+            Array.Copy(ToBytes(), 0, dataRegion, 0, 16);
+            return ComputeCRC32(dataRegion) == this.CheckSum;
+        }
+
+        // Lógica CRC32 Simples embutida para não precisares de mais ficheiros
+        private static uint ComputeCRC32(byte[] data)
+        {
+            uint crc = 0xFFFFFFFF;
+            for (int i = 0; i < data.Length; i++)
+            {
+                crc ^= data[i];
+                for (int j = 0; j < 8; j++)
+                {
+                    if ((crc & 1) != 0) crc = (crc >> 1) ^ 0xEDB88320;
+                    else crc >>= 1;
+                }
+            }
+            return ~crc;
         }
     }
 }
