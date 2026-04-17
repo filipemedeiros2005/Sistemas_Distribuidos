@@ -1,5 +1,3 @@
-using System;
-
 namespace OneHealth.Common
 {
     public enum MsgType : byte
@@ -26,4 +24,3 @@ namespace OneHealth.Common
         Video = 8
     }
 }
-
