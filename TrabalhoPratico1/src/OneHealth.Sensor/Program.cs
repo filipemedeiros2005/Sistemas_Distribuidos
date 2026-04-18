@@ -1,5 +1,6 @@
 ﻿#nullable enable
 using System;
+using System.IO;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using OneHealth.Common;
@@ -8,7 +9,7 @@ namespace OneHealth.Sensor
 {
     class Program
     {
-        private const uint SENSOR_ID = 101; 
+        private static uint _sensorId = 101; 
         private const string GATEWAY_IP = "127.0.0.1";
         private const int GATEWAY_TCP_PORT = 5001;
         private const int GATEWAY_UDP_PORT = 6000;
@@ -20,7 +21,14 @@ namespace OneHealth.Sensor
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine($"=== [SENSOR {SENSOR_ID}] One Health ===");
+            // 1. Processar Argumentos do Terminal (ID do Sensor e Modo)
+            if (args.Length > 0 && uint.TryParse(args[0], out uint parsedId)) {
+                _sensorId = parsedId;
+            }
+            
+            string forceMode = (args.Length > 1 && args[1].ToLower() == "auto") ? "1" : "";
+
+            Console.WriteLine($"=== [SENSOR {_sensorId}] One Health ===");
             
             Console.CancelKeyPress += (sender, e) => {
                 e.Cancel = true;
@@ -29,26 +37,30 @@ namespace OneHealth.Sensor
 
             try
             {
+                // 2. Ligar ao Gateway
                 _tcpClient = new TcpClient();
                 await _tcpClient.ConnectAsync(GATEWAY_IP, GATEWAY_TCP_PORT);
                 _stream = _tcpClient.GetStream();
 
-                var heloPacket = new TelemetryPacket { MsgType = MsgType.HELO, SensorID = SENSOR_ID };
+                var heloPacket = new TelemetryPacket { MsgType = MsgType.HELO, SensorID = _sensorId };
                 await SendPacketAsync(heloPacket);
-                Console.WriteLine("[SENSOR] HELO enviado ao Gateway. Ligação autorizada.");
+                Console.WriteLine($"[SENSOR {_sensorId}] HELO enviado. Ligação autorizada.");
 
-                // MENU HÍBRIDO (Requisito Fase 2)
-                Console.WriteLine("\nSelecione o modo de operação:");
-                Console.WriteLine("1. Modo Automático (Simulação EMA + Alertas)");
-                Console.WriteLine("2. Modo Manual (Inserir dados via teclado)");
-                Console.Write("Opção: ");
-                
-                string? opcao = Console.ReadLine();
-                Console.WriteLine();
+                // 3. Escolher o Modo
+                string opcao = forceMode;
+                if (string.IsNullOrEmpty(opcao))
+                {
+                    Console.WriteLine("\nSelecione o modo de operação:");
+                    Console.WriteLine("1. Modo Automático (Ler do CSV ou Simulação EMA)");
+                    Console.WriteLine("2. Modo Manual (Inserir dados via teclado)");
+                    Console.Write("Opção: ");
+                    opcao = Console.ReadLine() ?? "1";
+                    Console.WriteLine();
+                }
 
                 if (opcao == "1")
                 {
-                    await RunEmaSimulationAsync();
+                    await RunAutoSimulationAsync();
                 }
                 else
                 {
@@ -65,47 +77,57 @@ namespace OneHealth.Sensor
             }
         }
 
-        // --- MODO MANUAL ---
-        private static async Task RunManualModeAsync()
+        // --- MODO AUTOMÁTICO (Prioriza CSV, cai para EMA se não existir) ---
+        private static async Task RunAutoSimulationAsync()
         {
-            Console.WriteLine("[MODO MANUAL] Digite a temperatura (ex: 22,5) ou 'Q' para sair.");
-            while (_isRunning)
+            // Tenta encontrar o CSV na pasta data/simulation/
+            string csvPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "simulation", $"sensor_{_sensorId}.csv"));
+
+            if (File.Exists(csvPath))
             {
-                Console.Write("Temperatura: ");
-                string? input = Console.ReadLine();
-
-                if (input?.ToUpper() == "Q") break;
-
-                if (float.TryParse(input, out float valorManual))
+                Console.WriteLine($"[INFO] Ficheiro CSV encontrado para o Sensor {_sensorId}. A iniciar reprodução...");
+                var linhas = await File.ReadAllLinesAsync(csvPath);
+                
+                foreach (var linha in linhas)
                 {
-                    bool isAlerta = valorManual > 35.0f; // Exemplo: Alerta se maior que 35
-                    var packet = new TelemetryPacket
-                    {
-                        MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA,
-                        DataType = DataType.Temp,
-                        SensorID = SENSOR_ID,
-                        TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                        Value = valorManual
-                    };
+                    if (!_isRunning) break;
+                    if (string.IsNullOrWhiteSpace(linha) || linha.StartsWith("Tipo")) continue;
 
-                    await SendPacketAsync(packet);
-                    Console.WriteLine($"[ENVIADO] {packet.MsgType} | Valor: {valorManual}ºC");
-
-                    // Se for alerta, dispara também o vídeo
-                    if (isAlerta && !_isStreamingVideo)
+                    var partes = linha.Split(',');
+                    if (partes.Length >= 3)
                     {
-                        _isStreamingVideo = true;
-                        _ = Task.Run(() => StreamVideoUdpAsync());
+                        if (Enum.TryParse(partes[0], out DataType tipo) && 
+                            float.TryParse(partes[1], out float valor) &&
+                            bool.TryParse(partes[2], out bool isAlerta))
+                        {
+                            var packet = new TelemetryPacket
+                            {
+                                MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA,
+                                DataType = tipo,
+                                SensorID = _sensorId,
+                                TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                                Value = valor
+                            };
+
+                            if (isAlerta) TriggerEmergencyVideo();
+
+                            await SendPacketAsync(packet);
+                            Console.WriteLine($"[AUTO-CSV] {packet.MsgType} | {tipo}: {valor:F2}");
+                        }
                     }
+                    await Task.Delay(5000); // Ritmo de envio de 5 segundos
                 }
-                else
-                {
-                    Console.WriteLine("Valor inválido. Use números (ex: 20,5).");
-                }
+                Console.WriteLine("[INFO] Ficheiro CSV concluído. A manter ligação ativa.");
+                while (_isRunning) await Task.Delay(1000);
+            }
+            else
+            {
+                Console.WriteLine($"[AVISO] CSV não encontrado ({csvPath}). A iniciar Simulação Matemática (EMA)...");
+                await RunEmaSimulationAsync();
             }
         }
 
-        // --- MODO AUTOMÁTICO (EMA) ---
+        // --- MODO EMA (Matemático de contingência) ---
         private static async Task RunEmaSimulationAsync()
         {
             float alpha = 0.2f; float ema = 20.0f; var rnd = new Random();
@@ -116,46 +138,82 @@ namespace OneHealth.Sensor
                 if (isDisaster)
                 {
                     rawValue += 15.0f;
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("⚠️ [SENSOR] ANOMALIA DETETADA!");
-                    Console.ResetColor();
-
-                    if (!_isStreamingVideo)
-                    {
-                        _isStreamingVideo = true;
-                        _ = Task.Run(() => StreamVideoUdpAsync());
-                    }
+                    TriggerEmergencyVideo();
                 }
 
                 ema = (rawValue * alpha) + (ema * (1.0f - alpha));
-                var dataPacket = new TelemetryPacket
+                var packet = new TelemetryPacket
                 {
                     MsgType = isDisaster ? MsgType.ALERT : MsgType.DATA,
                     DataType = DataType.Temp,
-                    SensorID = SENSOR_ID,
+                    SensorID = _sensorId,
                     TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     Value = ema
                 };
 
-                await SendPacketAsync(dataPacket);
-                Console.WriteLine($"[AUTO] {dataPacket.MsgType} | Temp EMA: {ema:F2}ºC");
+                await SendPacketAsync(packet);
+                Console.WriteLine($"[AUTO-EMA] {packet.MsgType} | Temp: {ema:F2}ºC");
                 await Task.Delay(5000);
             }
         }
 
-        // --- STREAM DE VÍDEO (UDP) ---
+        // --- MODO MANUAL ---
+        private static async Task RunManualModeAsync()
+        {
+            Console.WriteLine("\n[MODO MANUAL] Tipos Suportados: 1:PM10, 2:PM25, 3:Temp, 4:Hum, 5:Ruido, 6:Lum");
+            while (_isRunning)
+            {
+                Console.Write("\nEscolha o Tipo (1-6) ou 'Q' para sair: ");
+                string? tipoInput = Console.ReadLine();
+                if (tipoInput?.ToUpper() == "Q") break;
+
+                if (!byte.TryParse(tipoInput, out byte tipoByte) || tipoByte < 1 || tipoByte > 6) continue;
+                DataType tipoEscolhido = (DataType)tipoByte;
+
+                Console.Write($"Digite o valor para {tipoEscolhido}: ");
+                if (float.TryParse(Console.ReadLine(), out float valorManual))
+                {
+                    bool isAlerta = (tipoEscolhido == DataType.Temp && valorManual > 35.0f) || (tipoEscolhido == DataType.Ruido && valorManual > 80.0f); 
+                    if (isAlerta) TriggerEmergencyVideo();
+
+                    var packet = new TelemetryPacket
+                    {
+                        MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA, DataType = tipoEscolhido,
+                        SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Value = valorManual
+                    };
+
+                    await SendPacketAsync(packet);
+                    Console.WriteLine($"[ENVIADO] {packet.MsgType} | {tipoEscolhido}: {valorManual}");
+                }
+            }
+        }
+
+        // --- GESTÃO DE VÍDEO ---
+        private static void TriggerEmergencyVideo()
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("⚠️ [SENSOR] ANOMALIA DETETADA!");
+            Console.ResetColor();
+
+            if (!_isStreamingVideo)
+            {
+                _isStreamingVideo = true;
+                _ = Task.Run(() => StreamVideoUdpAsync());
+            }
+        }
+
         private static async Task StreamVideoUdpAsync()
         {
-            Console.WriteLine("[VÍDEO] A iniciar transmissão UDP...");
+            Console.WriteLine("[VÍDEO] A iniciar transmissão UDP paralela...");
             using var udpClient = new UdpClient();
             uint seqNum = 1;
             var endTime = DateTime.Now.AddSeconds(10); // Transmite 10s
 
             while (_isRunning && DateTime.Now < endTime)
             {
-                var videoHeader = new VideoPacketHeader { SensorID = SENSOR_ID, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = seqNum++, DataSize = 256 };
+                var videoHeader = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = seqNum++, DataSize = 256 };
                 byte[] headerBytes = videoHeader.ToBytes();
-                byte[] fakePayload = new byte[256]; // Dados binários simulados
+                byte[] fakePayload = new byte[256]; 
                 new Random().NextBytes(fakePayload); 
                 
                 byte[] fullPacket = new byte[headerBytes.Length + fakePayload.Length];
@@ -180,7 +238,7 @@ namespace OneHealth.Sensor
         {
             if (_tcpClient != null && _tcpClient.Connected)
             {
-                var byePacket = new TelemetryPacket { MsgType = MsgType.BYE, SensorID = SENSOR_ID };
+                var byePacket = new TelemetryPacket { MsgType = MsgType.BYE, SensorID = _sensorId };
                 await SendPacketAsync(byePacket);
                 _stream?.Close(); _tcpClient?.Close();
             }
