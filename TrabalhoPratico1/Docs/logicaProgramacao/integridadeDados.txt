@@ -1,0 +1,11 @@
+FUNÇÃO ValidarIntegridade(arrayBytes20):
+    // Extrai o checksum que veio no pacote (últimos 4 bytes)
+    ChecksumRecebido = ExtrairUint32(arrayBytes20, offset: 16)
+    
+    // Calcula o checksum dos primeiros 16 bytes
+    ChecksumCalculado = CALCULAR_CRC32(arrayBytes20.SubArray(0, 16))
+    
+    SE ChecksumCalculado == ChecksumRecebido:
+        RETORNAR VERDADEIRO // Pacote íntegro
+    SENÃO:
+        RETORNAR FALSO // Descartar pacote e registar erro

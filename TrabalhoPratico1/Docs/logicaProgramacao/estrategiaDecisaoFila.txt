@@ -1,0 +1,48 @@
+// Inicialização do Sensor: Carrega o estado base para evitar o período de não ter dados estatísticos
+FUNÇÃO IniciarSensor(mediaFabrica, varianciaFabrica):
+MediaEMA = mediaFabrica        // Define o valor esperado inicial para o ambiente urbano específico
+VarianciaEMA = varianciaFabrica // Carrega a volatilidade base para o cálculo do desvio padrão
+BufferRotina = NOVA LISTA()    // Inicializa o acumulador de dados para otimização energética/rede (Batching)
+
+// Processamento de Dados: Cérebro do Edge Computing (decide o destino de cada leitura)
+FUNÇÃO ProcessarMedicao(novoValor):
+// 1. Encapsulamento de Rede
+Pacote = NOVO PACOTE(novoValor)
+Pacote.Timestamp = OBTER_TEMPO_ATUAL() // Registo na origem para garantir ordem cronológica na BD
+
+    // 2. Cálculo do Gatilho de Alerta (Regra dos 3-Sigma)
+    LimiteSuperior = MediaEMA + (3 * RAIZ_QUADRADA(VarianciaEMA))
+    
+    // 3. Via da Esquerda: Gestão de Anomalias (Cenário Crítico)
+    SE novoValor > LimiteSuperior:
+        Pacote.MsgType = 6 // Define como ALERT para avançar para a fila de prioridade no Gateway (QoS)
+        
+        // Preserva o histórico imediatamente anterior à anomalia
+        PacotesUrgentes = BufferRotina
+        PacotesUrgentes.Adicionar(Pacote)
+        
+        ENVIAR_SOCKET(PacotesUrgentes) // Flush imediato por falha/emergência iminente
+        BufferRotina = NOVA LISTA()    // Reinicia o acumulador após o envio de emergência
+        
+        // Impede o "Envenenamento da Baseline": Valores anómalos não entram na média normal
+        RETORNAR 
+        
+    // 4. Via da Direita: Operação de Rotina (Cenário Normal)
+    CASO CONTRÁRIO:
+        Pacote.MsgType = 2 // Define como DATA (Tráfego de baixa prioridade)
+        BufferRotina.Adicionar(Pacote)
+        
+        // Otimização de Bateria: Envia dados em lotes para reduzir handshakes TCP
+        SE BufferRotina.Tamanho >= 10:
+            ENVIAR_SOCKET(BufferRotina)
+            BufferRotina = NOVA LISTA()
+            
+        // 5. Aprendizagem Contínua (Média Móvel Exponencial - EMA)
+        // Atualiza a inteligência do sensor com peso de 10% (Alpha=0.1) para o dado novo
+        MediaNova = (0.1 * novoValor) + (0.9 * MediaEMA)
+        
+        // Atualiza a variância para ajustar a sensibilidade do desvio padrão dinamicamente
+        VarianciaNova = (0.1 * (novoValor - MediaEMA)^2) + (0.9 * VarianciaEMA)
+        
+        MediaEMA = MediaNova
+        VarianciaEMA = VarianciaNova
