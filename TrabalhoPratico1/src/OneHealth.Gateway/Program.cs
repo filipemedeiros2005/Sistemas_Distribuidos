@@ -29,10 +29,11 @@ namespace OneHealth.Gateway
         private const int SENSOR_TCP_PORT = 5001;
         private const int SENSOR_UDP_PORT = 6000;
         private const string SERVER_IP = "127.0.0.1";
-        private const int SERVER_PORT = 5005; // A nova porta do Servidor
+        private const int SERVER_PORT = 5005; 
 
+        // Garante que tens ESTAS DUAS linhas aqui:
         private static readonly string CONFIG_FILE = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "sensors_config.csv"));
-        
+        private static readonly string VIDEO_DIR = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "videos"));
         // Dicionário de Configurações e Estado (RAM)
         private static readonly ConcurrentDictionary<uint, SensorConfig> _sensors = new();
 
@@ -300,6 +301,8 @@ namespace OneHealth.Gateway
 
         private static async Task StartUdpVideoProxyAsync()
         {
+            if (!Directory.Exists(VIDEO_DIR)) Directory.CreateDirectory(VIDEO_DIR);
+
             using var udpClient = new UdpClient(SENSOR_UDP_PORT);
             while (true)
             {
@@ -307,18 +310,30 @@ namespace OneHealth.Gateway
                 {
                     UdpReceiveResult result = await udpClient.ReceiveAsync();
                     
-                    if (result.Buffer.Length >= 16) // Tem cabeçalho válido?
+                    if (result.Buffer.Length >= 16)
                     {
                         VideoPacketHeader header = VideoPacketHeader.FromBytes(result.Buffer);
-                        // Como prova de conceito, apenas logamos a passagem do vídeo. 
-                        // Num sistema real, gravaríamos no disco usando 'File.WriteAllBytes'
-                        if (header.SequenceNum % 20 == 0) // Log apenas a cada 20 frames para não poluir
+                        
+                        // Extrair apenas a imagem (Payload) do pacote UDP
+                        byte[] payload = new byte[result.Buffer.Length - 16];
+                        Buffer.BlockCopy(result.Buffer, 16, payload, 0, payload.Length);
+
+                        // Gravar de forma contínua no disco (Append)
+                        string fileName = $"S{header.SensorID}_Recording.raw";
+                        string filePath = Path.Combine(VIDEO_DIR, fileName);
+
+                        using (var fs = new FileStream(filePath, FileMode.Append, FileAccess.Write, FileShare.None))
                         {
-                            Console.WriteLine($"[VÍDEO PROXY] A receber frames UDP do Sensor {header.SensorID} (Seq: {header.SequenceNum})");
+                            await fs.WriteAsync(payload, 0, payload.Length);
+                        }
+
+                        if (header.SequenceNum % 20 == 0) 
+                        {
+                            Console.WriteLine($"[VÍDEO GRAVADO] Sensor {header.SensorID} | Frame Seq: {header.SequenceNum} guardado em {fileName}");
                         }
                     }
                 }
-                catch { /* Ignora erros de rede no UDP */ }
+                catch { /* Ignora erros de rede UDP */ }
             }
         }
 
