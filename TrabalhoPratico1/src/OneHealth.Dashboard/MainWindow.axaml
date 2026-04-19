@@ -1,22 +1,37 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:OneHealth.Dashboard"
         x:Class="OneHealth.Dashboard.MainWindow"
         Title="One Health - Command Center" Width="950" Height="700" Background="#121212">
+    
     <StackPanel Margin="20" Spacing="10">
-        <TextBlock Text="🌍 One Health - Gestão Urbana" FontSize="26" FontWeight="Bold" Foreground="#3498db"/>
+        <TextBlock Text="One Health - Gestao Urbana" FontSize="26" FontWeight="Bold" Foreground="#3498db"/>
+        
+        <StackPanel Orientation="Horizontal" Spacing="20" Margin="0,0,0,10">
+            <TextBlock Name="TxtGatewayStats" Foreground="#f1c40f" FontSize="14" FontWeight="Bold"/>
+            <TextBlock Name="TxtServerStats" Foreground="#e67e22" FontSize="14" FontWeight="Bold"/>
+        </StackPanel>
+
         <TabControl Background="#1e1e1e" Height="550">
             <TabItem Header="Sensores (Estado)">
                 <ListBox Name="LstSensors" Background="#1e1e1e" Foreground="White" FontSize="18"/>
             </TabItem>
+            
             <TabItem Header="Telemetria Real-Time">
                 <ListBox Name="LstTelemetry" Background="#1e1e1e" Foreground="#3498db" FontSize="14"/>
             </TabItem>
-            <TabItem Header="Incidentes &amp; Vídeo">
-                <StackPanel Spacing="10">
-                    <TextBlock Name="TxtVideoStats" Text="Aguardando anomalias..." Foreground="#e67e22" FontSize="16" Margin="10"/>
-                    <ListBox Name="LstAlerts" Height="350" Background="#1e1e1e" Foreground="#e74c3c"/>
-                    <Button Name="BtnStream" Content="📹 Abrir Player de Vídeo (Análise de Incidente)" HorizontalAlignment="Center" Background="#c0392b" Foreground="White" Padding="15,10"/>
-                </StackPanel>
+            
+            <TabItem Header="Incidentes (Anomalias)">
+                <ListBox Name="LstAlerts" Background="#1e1e1e">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:AlertaItem">
+                            <StackPanel Orientation="Horizontal" Spacing="15" Margin="0,5">
+                                <TextBlock Text="{Binding Texto}" Foreground="#e74c3c" FontSize="16" VerticalAlignment="Center" Width="600"/>
+                                <Button Content="Ver Video" Click="BtnVerVideo_Click" Background="#c0392b" Foreground="White" Padding="10,5"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
             </TabItem>
         </TabControl>
     </StackPanel>

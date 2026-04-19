@@ -58,19 +58,16 @@ namespace OneHealth.Sensor
             if (File.Exists(pathRaiz)) csvPath = pathRaiz;
             else if (File.Exists(pathSrc)) csvPath = pathSrc;
 
-            if (string.IsNullOrEmpty(csvPath))
-            {
-                Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ERRO FATAL] CSV para o sensor {_sensorId} NÃO ENCONTRADO!"); Console.ResetColor();
-                while (_isRunning) await Task.Delay(5000); return;
+            if (string.IsNullOrEmpty(csvPath)) {
+                Console.WriteLine($"[ERRO FATAL] CSV nao encontrado. A parar."); return;
             }
 
-            Console.WriteLine($"[INFO] CSV validado. A iniciar Algoritmo 3-Sigma em Loop Infinito...");
+            Console.WriteLine($"[INFO] Algoritmo 3-Sigma Iniciado.");
             var linhas = await File.ReadAllLinesAsync(csvPath);
             
             float alpha = 0.2f, ema = 0f, emaVar = 1f;
-            bool primeiraLeitura = true; int leiturasCount = 0;
+            bool primeiraLeitura = true;
 
-            // LOOP INFINITO AQUI! O sensor nunca pára de ler o ficheiro.
             while (_isRunning) 
             {
                 foreach (var linha in linhas)
@@ -83,10 +80,10 @@ namespace OneHealth.Sensor
                     if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(valorFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue))
                     {
                         if (primeiraLeitura) { ema = rawValue; primeiraLeitura = false; }
-                        leiturasCount++;
 
+                        // REMOVIDO o "leiturasCount > 3". Agora qualquer anomalia dispara imediatamente!
                         float threshold = Math.Max(3 * (float)Math.Sqrt(emaVar), 5.0f); 
-                        bool isAlerta = (Math.Abs(rawValue - ema) > threshold) && (leiturasCount > 3); 
+                        bool isAlerta = Math.Abs(rawValue - ema) > threshold; 
 
                         var packet = new TelemetryPacket {
                             MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA, DataType = tipo, SensorID = _sensorId,
@@ -94,7 +91,7 @@ namespace OneHealth.Sensor
                         };
 
                         if (isAlerta) {
-                            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"⚠️ [ALERTA 3-SIGMA] {rawValue:F2} detetado!"); Console.ResetColor();
+                            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ALERTA] {rawValue:F2} detetado!"); Console.ResetColor();
                             TriggerEmergencyVideo();
                             foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                             _bufferRotina.Clear();
@@ -103,17 +100,16 @@ namespace OneHealth.Sensor
                             ema = ema + alpha * (rawValue - ema);
                             emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
                             _bufferRotina.Add(packet);
-                            Console.WriteLine($"[DADO] Agendado no Buffer Edge (Tamanho: {_bufferRotina.Count}/2)");
+                            Console.WriteLine($"[DADO] Agendado no Buffer Edge ({_bufferRotina.Count}/2)");
+                            
                             if (_bufferRotina.Count >= 2) {
                                 foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                                 _bufferRotina.Clear();
-                                Console.WriteLine("[BATCH ENVIADO] Lote despachado para o Gateway.");
                             }
                         }
                     }
                     await Task.Delay(5000); 
                 }
-                Console.WriteLine("[INFO] Reiniciando leitura do CSV para manter fluxo constante...");
             }
         }
 

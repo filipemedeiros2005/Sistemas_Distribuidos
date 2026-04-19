@@ -11,11 +11,15 @@ using System.Linq;
 
 namespace OneHealth.Dashboard;
 
+public class AlertaItem {
+    public string Texto { get; set; } = "";
+}
+
 public partial class MainWindow : Window
 {
     private const string DB_CONNECTION = "Host=localhost;Username=postgres;Password=postgres;Database=onehealth";
     
-    public ObservableCollection<string> Alertas { get; set; } = new();
+    public ObservableCollection<AlertaItem> Alertas { get; set; } = new();
     public ObservableCollection<string> Sensores { get; set; } = new();
     public ObservableCollection<string> TelemetriaGlobal { get; set; } = new(); 
     
@@ -27,7 +31,6 @@ public partial class MainWindow : Window
         LstAlerts.ItemsSource = Alertas; 
         LstSensors.ItemsSource = Sensores; 
         LstTelemetry.ItemsSource = TelemetriaGlobal; 
-        BtnStream.Click += BtnStream_Click;
         
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (s, e) => AtualizarDashboards();
@@ -61,27 +64,35 @@ public partial class MainWindow : Window
         TelemetriaGlobal.Clear(); 
         Alertas.Clear();
         
-        using var cmdAll = new NpgsqlCommand("SELECT timestamp, sensor_id, data_type, value, msg_type FROM telemetry ORDER BY id DESC LIMIT 15", conn);
+        using var cmdAll = new NpgsqlCommand("SELECT timestamp, sensor_id, data_type, value, msg_type FROM telemetry ORDER BY timestamp DESC LIMIT 20", conn);
         using var readerAll = cmdAll.ExecuteReader();
         while(readerAll.Read()) {
             string msg = readerAll.GetString(4);
             string linha = $"[{readerAll.GetDateTime(0):HH:mm:ss}] Sensor {readerAll.GetInt64(1)} -> {readerAll.GetString(2)}: {readerAll.GetFloat(3):F2}";
             
-            if (msg == "ALERT") Alertas.Add("[ALERTA] " + linha);
+            if (msg == "ALERT") Alertas.Add(new AlertaItem { Texto = "[ALERTA] " + linha });
             else TelemetriaGlobal.Add(linha);
         }
         readerAll.Close();
 
-        // Leitura dinâmica da pasta do servidor para evitar falhas se um sensor diferente disparar
-        string liveDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "server_live"));
-        if (Directory.Exists(liveDir) && TxtVideoStats != null) 
-        {
-            long totalBytes = new DirectoryInfo(liveDir).GetFiles("*.raw").Sum(f => f.Length);
-            TxtVideoStats.Text = $"Trafego de Live Stream no Servidor Central: {totalBytes / 1024} KB recebidos via Gateway.";
+        // Pesquisa dinamica para evitar o erro CS0103 de compilacao do Avalonia
+        var txtGateway = this.FindControl<TextBlock>("TxtGatewayStats");
+        var txtServer = this.FindControl<TextBlock>("TxtServerStats");
+
+        string edgeDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "videos"));
+        if (Directory.Exists(edgeDir) && txtGateway != null) {
+            long edgeBytes = new DirectoryInfo(edgeDir).GetFiles("*.raw").Sum(f => f.Length);
+            txtGateway.Text = $"Armazenamento Borda (Gateway): {edgeBytes / 1024} KB guardados localmente.";
+        }
+
+        string cloudDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "server_live"));
+        if (Directory.Exists(cloudDir) && txtServer != null) {
+            long cloudBytes = new DirectoryInfo(cloudDir).GetFiles("*.raw").Sum(f => f.Length);
+            txtServer.Text = $"Backups de Emergencia (Servidor): {cloudBytes / 1024} KB recebidos.";
         }
     }
 
-    private void BtnStream_Click(object? sender, RoutedEventArgs e) {
+    public void BtnVerVideo_Click(object? sender, RoutedEventArgs e) {
         try {
             string videoPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "S101_CCTV.mp4"));
             if (File.Exists(videoPath)) Process.Start(new ProcessStartInfo { FileName = videoPath, UseShellExecute = true });
