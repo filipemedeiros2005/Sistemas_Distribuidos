@@ -1,6 +1,7 @@
 ﻿#nullable enable
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Net.Sockets;
 using System.Threading.Tasks;
@@ -33,24 +34,42 @@ namespace OneHealth.Sensor
 
             try
             {
-                _tcpClient = new TcpClient(); await _tcpClient.ConnectAsync(GATEWAY_IP, _gatewayTcpPort); _stream = _tcpClient.GetStream();
-                // AQUI FALTAVA O TIMESTAMP! O Servidor precisa dele para a DB.
+                _tcpClient = new TcpClient(); 
+                await _tcpClient.ConnectAsync(GATEWAY_IP, _gatewayTcpPort); 
+                _stream = _tcpClient.GetStream();
+                
                 await SendPacketAsync(new TelemetryPacket { MsgType = MsgType.HELO, SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
 
-                string opcao = forceMode == "" ? "1" : forceMode;
-                if (opcao == "1") await RunAutoSimulationAsync();
+                if (forceMode == "1" || forceMode == "") await RunAutoSimulationAsync();
                 else await RunManualModeAsync(); 
             }
-            catch (Exception ex) { Console.WriteLine($"[ERRO] {ex.Message}"); }
+            catch (Exception ex) { Console.WriteLine($"[ERRO DE LIGAÇÃO] {ex.Message}"); }
             finally { if (_tcpClient != null && _tcpClient.Connected) await SendPacketAsync(new TelemetryPacket { MsgType = MsgType.BYE, SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() }); }
         }
 
         private static async Task RunAutoSimulationAsync()
         {
-            string csvPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "simulation", $"sensor_{_sensorId}.csv"));
-            if (!File.Exists(csvPath)) return;
+            string baseDir = AppContext.BaseDirectory;
+            string csvPath = "";
 
+            string pathRaiz = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "data", "simulation", $"sensor_{_sensorId}.csv"));
+            string pathSrc = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "data", "simulation", $"sensor_{_sensorId}.csv"));
+
+            if (File.Exists(pathRaiz)) csvPath = pathRaiz;
+            else if (File.Exists(pathSrc)) csvPath = pathSrc;
+
+            if (string.IsNullOrEmpty(csvPath))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[ERRO FATAL] CSV para o sensor {_sensorId} NÃO ENCONTRADO!");
+                Console.ResetColor();
+                while (_isRunning) await Task.Delay(5000);
+                return;
+            }
+
+            Console.WriteLine($"[INFO] CSV validado. A iniciar Algoritmo 3-Sigma...");
             var linhas = await File.ReadAllLinesAsync(csvPath);
+            
             float alpha = 0.2f, ema = 0f, emaVar = 1f;
             bool primeiraLeitura = true; int leiturasCount = 0;
 
@@ -60,7 +79,10 @@ namespace OneHealth.Sensor
                 if (string.IsNullOrWhiteSpace(linha) || !linha.Contains(",")) continue;
                 var p = linha.Split(',');
 
-                if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(p[1], out float rawValue))
+                // CORREÇÃO DA LÍNGUA DO SISTEMA: Substitui a vírgula por ponto (caso exista) e força InvariantCulture
+                string valorFormatado = p[1].Replace(',', '.');
+
+                if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(valorFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue))
                 {
                     if (primeiraLeitura) { ema = rawValue; primeiraLeitura = false; }
                     leiturasCount++;
@@ -75,7 +97,7 @@ namespace OneHealth.Sensor
 
                     if (isAlerta) 
                     {
-                        Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ALERTA 3-SIGMA] {rawValue:F2}"); Console.ResetColor();
+                        Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"⚠️ [ALERTA 3-SIGMA] {rawValue:F2} detetado!"); Console.ResetColor();
                         TriggerEmergencyVideo();
                         
                         foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
@@ -88,18 +110,21 @@ namespace OneHealth.Sensor
                         emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
                         
                         _bufferRotina.Add(packet);
-                        Console.WriteLine($"[DADO GERADO] Agendado no Buffer (Tamanho atual: {_bufferRotina.Count}/2)");
+                        Console.WriteLine($"[DADO] Agendado no Buffer Edge (Tamanho: {_bufferRotina.Count}/2)");
                         
-                        // LOTE DE 2 para feedback rápido na apresentação (10s de espera)
                         if (_bufferRotina.Count >= 2) {
                             foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                             _bufferRotina.Clear();
-                            Console.WriteLine("[BATCH ENVIADO] Lote despachado.");
+                            Console.WriteLine("[BATCH ENVIADO] Lote despachado para o Gateway.");
                         }
                     }
                 }
+                else {
+                    Console.WriteLine($"[AVISO] Linha ignorada/formato inválido: {linha}");
+                }
                 await Task.Delay(5000); 
             }
+            Console.WriteLine("[INFO] Leitura do CSV concluída.");
             while (_isRunning) await Task.Delay(1000);
         }
 
@@ -108,11 +133,19 @@ namespace OneHealth.Sensor
         }
 
         private static async Task StreamVideoUdpAsync() {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[UDP] A iniciar transmissão de Vídeo para a Borda (Porta {_gatewayUdpPort})...");
+            Console.ResetColor();
+
             using var udpClient = new UdpClient(); uint seq = 1; var end = DateTime.Now.AddSeconds(10);
             while (_isRunning && DateTime.Now < end) {
-                var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = seq++, DataSize = 256 };
+                var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = seq, DataSize = 256 };
                 byte[] b = new byte[16 + 256]; Buffer.BlockCopy(h.ToBytes(), 0, b, 0, 16); new Random().NextBytes(b.AsSpan(16).ToArray());
+                
                 await udpClient.SendAsync(b, b.Length, GATEWAY_IP, _gatewayUdpPort);
+                
+                if (seq % 10 == 0) Console.WriteLine($"[UDP] Frame {seq} gerado e enviado (256 bytes) >>");
+                seq++;
                 await Task.Delay(50);
             }
             _isStreamingVideo = false;
@@ -122,6 +155,7 @@ namespace OneHealth.Sensor
             packet.CalculateAndSetChecksum();
             if (_stream != null) await _stream.WriteAsync(packet.ToBytes());
         }
+        
         private static async Task RunManualModeAsync() { while(true) await Task.Delay(1000); }
     }
 }

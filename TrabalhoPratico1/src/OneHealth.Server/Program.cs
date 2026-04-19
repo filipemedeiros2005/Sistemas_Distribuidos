@@ -46,7 +46,8 @@ namespace OneHealth.Server
                     CREATE TABLE IF NOT EXISTS sensor_status (
                         sensor_id BIGINT PRIMARY KEY, status VARCHAR(20), last_seen TIMESTAMP
                     );
-                    TRUNCATE TABLE telemetry, sensor_status RESTART IDENTITY;
+                    TRUNCATE TABLE telemetry RESTART IDENTITY CASCADE;
+                    TRUNCATE TABLE sensor_status RESTART IDENTITY CASCADE;
                 ", conn);
                 cmd.ExecuteNonQuery();
                 Console.WriteLine("[DB] Tabelas prontas e limpas para a defesa.");

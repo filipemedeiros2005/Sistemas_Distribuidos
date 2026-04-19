@@ -143,10 +143,21 @@ namespace OneHealth.Gateway
                 try {
                     var res = await udpClient.ReceiveAsync();
                     if (res.Buffer.Length >= 16) {
-                        VideoPacketHeader h = VideoPacketHeader.FromBytes(res.Buffer);
-                        byte[] p = new byte[res.Buffer.Length - 16]; Buffer.BlockCopy(res.Buffer, 16, p, 0, p.Length);
-                        using var fs = new FileStream(Path.Combine(VIDEO_DIR, $"S{h.SensorID}_Recording.raw"), FileMode.Append, FileAccess.Write, FileShare.None);
+                        // 1. Extrair Cabeçalho para identificar o Sensor
+                        VideoPacketHeader header = VideoPacketHeader.FromBytes(res.Buffer);
+                        
+                        // 2. Gravar os dados RAW no disco
+                        byte[] p = new byte[res.Buffer.Length - 16]; 
+                        Buffer.BlockCopy(res.Buffer, 16, p, 0, p.Length);
+                        using var fs = new FileStream(Path.Combine(VIDEO_DIR, $"S{header.SensorID}_Recording.raw"), FileMode.Append, FileAccess.Write, FileShare.None);
                         await fs.WriteAsync(p);
+
+                        // 3. Imprimir a confirmação na consola a cada 10 frames
+                        if (header.SequenceNum % 10 == 0) {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine($"[VÍDEO EDGE] Gateway recebeu e gravou o Frame {header.SequenceNum} do Sensor {header.SensorID} na Borda!");
+                            Console.ResetColor();
+                        }
                     }
                 } catch { }
             }
