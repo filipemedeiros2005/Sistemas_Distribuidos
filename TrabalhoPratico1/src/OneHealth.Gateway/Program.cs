@@ -138,24 +138,28 @@ namespace OneHealth.Gateway
         
         private static async Task StartUdpVideoProxyAsync() {
             if (!Directory.Exists(VIDEO_DIR)) Directory.CreateDirectory(VIDEO_DIR);
+            
             using var udpClient = new UdpClient(SENSOR_UDP_PORT);
+            using var serverForwarder = new UdpClient(); // Cliente para enviar ao servidor
+
             while (true) {
                 try {
                     var res = await udpClient.ReceiveAsync();
                     if (res.Buffer.Length >= 16) {
-                        // 1. Extrair Cabeçalho para identificar o Sensor
                         VideoPacketHeader header = VideoPacketHeader.FromBytes(res.Buffer);
                         
-                        // 2. Gravar os dados RAW no disco
+                        // 1. Gravar na Borda (Edge)
                         byte[] p = new byte[res.Buffer.Length - 16]; 
                         Buffer.BlockCopy(res.Buffer, 16, p, 0, p.Length);
                         using var fs = new FileStream(Path.Combine(VIDEO_DIR, $"S{header.SensorID}_Recording.raw"), FileMode.Append, FileAccess.Write, FileShare.None);
                         await fs.WriteAsync(p);
 
-                        // 3. Imprimir a confirmação na consola a cada 10 frames
+                        // 2. REENCAMINHAR PARA O SERVIDOR (Live Stream Pass-Through)
+                        await serverForwarder.SendAsync(res.Buffer, res.Buffer.Length, SERVER_IP, 7000);
+
                         if (header.SequenceNum % 10 == 0) {
                             Console.ForegroundColor = ConsoleColor.Yellow;
-                            Console.WriteLine($"[VÍDEO EDGE] Gateway recebeu e gravou o Frame {header.SequenceNum} do Sensor {header.SensorID} na Borda!");
+                            Console.WriteLine($"[VÍDEO EDGE] Frame {header.SequenceNum} (S{header.SensorID}) guardado e reencaminhado para o Servidor!");
                             Console.ResetColor();
                         }
                     }

@@ -7,6 +7,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 
 namespace OneHealth.Dashboard;
 
@@ -23,7 +24,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        LstAlerts.ItemsSource = Alertas; LstSensors.ItemsSource = Sensores; LstTelemetry.ItemsSource = TelemetriaGlobal; 
+        LstAlerts.ItemsSource = Alertas; 
+        LstSensors.ItemsSource = Sensores; 
+        LstTelemetry.ItemsSource = TelemetriaGlobal; 
         BtnStream.Click += BtnStream_Click;
         
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -35,27 +38,28 @@ public partial class MainWindow : Window
     {
         try {
             using var conn = new NpgsqlConnection(DB_CONNECTION); conn.Open();
-            CarregarSensores(conn); CarregarDados(conn);
+            CarregarSensores(conn); 
+            CarregarDados(conn);
         } catch { }
     }
 
     private void CarregarSensores(NpgsqlConnection conn)
     {
         Sensores.Clear();
-        // LÊ DIRETAMENTE DA NOVA TABELA DE ESTADOS! Sem matemáticas de fusos horários.
         using var cmd = new NpgsqlCommand("SELECT sensor_id, status, last_seen FROM sensor_status ORDER BY sensor_id", conn);
         using var reader = cmd.ExecuteReader();
         while (reader.Read()) {
             long id = reader.GetInt64(0);
             string status = reader.GetString(1);
-            string statusIcon = status == "ONLINE" ? "🟢 ONLINE" : "🔴 OFFLINE";
+            string statusIcon = status == "ONLINE" ? "[ONLINE]" : "[OFFLINE]";
             Sensores.Add($"{statusIcon} - Unidade Sensor {id}");
         }
     }
 
     private void CarregarDados(NpgsqlConnection conn) 
     {
-        TelemetriaGlobal.Clear(); Alertas.Clear();
+        TelemetriaGlobal.Clear(); 
+        Alertas.Clear();
         
         using var cmdAll = new NpgsqlCommand("SELECT timestamp, sensor_id, data_type, value, msg_type FROM telemetry ORDER BY id DESC LIMIT 15", conn);
         using var readerAll = cmdAll.ExecuteReader();
@@ -63,13 +67,18 @@ public partial class MainWindow : Window
             string msg = readerAll.GetString(4);
             string linha = $"[{readerAll.GetDateTime(0):HH:mm:ss}] Sensor {readerAll.GetInt64(1)} -> {readerAll.GetString(2)}: {readerAll.GetFloat(3):F2}";
             
-            if (msg == "ALERT") Alertas.Add("⚠️ " + linha);
+            if (msg == "ALERT") Alertas.Add("[ALERTA] " + linha);
             else TelemetriaGlobal.Add(linha);
         }
         readerAll.Close();
 
-        string videoPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "videos", "S101_Recording.raw"));
-        if (File.Exists(videoPath)) TxtVideoStats.Text = $"📁 Tamanho do Vídeo na Borda: {new FileInfo(videoPath).Length / 1024} KB (Transporte UDP OK)";
+        // Leitura dinâmica da pasta do servidor para evitar falhas se um sensor diferente disparar
+        string liveDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "server_live"));
+        if (Directory.Exists(liveDir) && TxtVideoStats != null) 
+        {
+            long totalBytes = new DirectoryInfo(liveDir).GetFiles("*.raw").Sum(f => f.Length);
+            TxtVideoStats.Text = $"Trafego de Live Stream no Servidor Central: {totalBytes / 1024} KB recebidos via Gateway.";
+        }
     }
 
     private void BtnStream_Click(object? sender, RoutedEventArgs e) {

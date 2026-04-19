@@ -60,72 +60,61 @@ namespace OneHealth.Sensor
 
             if (string.IsNullOrEmpty(csvPath))
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[ERRO FATAL] CSV para o sensor {_sensorId} NÃO ENCONTRADO!");
-                Console.ResetColor();
-                while (_isRunning) await Task.Delay(5000);
-                return;
+                Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ERRO FATAL] CSV para o sensor {_sensorId} NÃO ENCONTRADO!"); Console.ResetColor();
+                while (_isRunning) await Task.Delay(5000); return;
             }
 
-            Console.WriteLine($"[INFO] CSV validado. A iniciar Algoritmo 3-Sigma...");
+            Console.WriteLine($"[INFO] CSV validado. A iniciar Algoritmo 3-Sigma em Loop Infinito...");
             var linhas = await File.ReadAllLinesAsync(csvPath);
             
             float alpha = 0.2f, ema = 0f, emaVar = 1f;
             bool primeiraLeitura = true; int leiturasCount = 0;
 
-            foreach (var linha in linhas)
+            // LOOP INFINITO AQUI! O sensor nunca pára de ler o ficheiro.
+            while (_isRunning) 
             {
-                if (!_isRunning) break;
-                if (string.IsNullOrWhiteSpace(linha) || !linha.Contains(",")) continue;
-                var p = linha.Split(',');
-
-                // CORREÇÃO DA LÍNGUA DO SISTEMA: Substitui a vírgula por ponto (caso exista) e força InvariantCulture
-                string valorFormatado = p[1].Replace(',', '.');
-
-                if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(valorFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue))
+                foreach (var linha in linhas)
                 {
-                    if (primeiraLeitura) { ema = rawValue; primeiraLeitura = false; }
-                    leiturasCount++;
+                    if (!_isRunning) break;
+                    if (string.IsNullOrWhiteSpace(linha) || !linha.Contains(",")) continue;
+                    var p = linha.Split(',');
+                    string valorFormatado = p[1].Replace(',', '.');
 
-                    float threshold = Math.Max(3 * (float)Math.Sqrt(emaVar), 5.0f); 
-                    bool isAlerta = (Math.Abs(rawValue - ema) > threshold) && (leiturasCount > 3); 
-
-                    var packet = new TelemetryPacket {
-                        MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA, DataType = tipo, SensorID = _sensorId,
-                        TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Value = rawValue
-                    };
-
-                    if (isAlerta) 
+                    if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(valorFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue))
                     {
-                        Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"⚠️ [ALERTA 3-SIGMA] {rawValue:F2} detetado!"); Console.ResetColor();
-                        TriggerEmergencyVideo();
-                        
-                        foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
-                        _bufferRotina.Clear();
-                        await SendPacketAsync(packet);
-                    }
-                    else 
-                    {
-                        ema = ema + alpha * (rawValue - ema);
-                        emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
-                        
-                        _bufferRotina.Add(packet);
-                        Console.WriteLine($"[DADO] Agendado no Buffer Edge (Tamanho: {_bufferRotina.Count}/2)");
-                        
-                        if (_bufferRotina.Count >= 2) {
+                        if (primeiraLeitura) { ema = rawValue; primeiraLeitura = false; }
+                        leiturasCount++;
+
+                        float threshold = Math.Max(3 * (float)Math.Sqrt(emaVar), 5.0f); 
+                        bool isAlerta = (Math.Abs(rawValue - ema) > threshold) && (leiturasCount > 3); 
+
+                        var packet = new TelemetryPacket {
+                            MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA, DataType = tipo, SensorID = _sensorId,
+                            TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Value = rawValue
+                        };
+
+                        if (isAlerta) {
+                            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"⚠️ [ALERTA 3-SIGMA] {rawValue:F2} detetado!"); Console.ResetColor();
+                            TriggerEmergencyVideo();
                             foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                             _bufferRotina.Clear();
-                            Console.WriteLine("[BATCH ENVIADO] Lote despachado para o Gateway.");
+                            await SendPacketAsync(packet);
+                        } else {
+                            ema = ema + alpha * (rawValue - ema);
+                            emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
+                            _bufferRotina.Add(packet);
+                            Console.WriteLine($"[DADO] Agendado no Buffer Edge (Tamanho: {_bufferRotina.Count}/2)");
+                            if (_bufferRotina.Count >= 2) {
+                                foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
+                                _bufferRotina.Clear();
+                                Console.WriteLine("[BATCH ENVIADO] Lote despachado para o Gateway.");
+                            }
                         }
                     }
+                    await Task.Delay(5000); 
                 }
-                else {
-                    Console.WriteLine($"[AVISO] Linha ignorada/formato inválido: {linha}");
-                }
-                await Task.Delay(5000); 
+                Console.WriteLine("[INFO] Reiniciando leitura do CSV para manter fluxo constante...");
             }
-            Console.WriteLine("[INFO] Leitura do CSV concluída.");
-            while (_isRunning) await Task.Delay(1000);
         }
 
         private static void TriggerEmergencyVideo() {
@@ -133,20 +122,14 @@ namespace OneHealth.Sensor
         }
 
         private static async Task StreamVideoUdpAsync() {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"[UDP] A iniciar transmissão de Vídeo para a Borda (Porta {_gatewayUdpPort})...");
-            Console.ResetColor();
-
+            Console.ForegroundColor = ConsoleColor.Yellow; Console.WriteLine($"[UDP] A transmitir Frames de Vídeo (Porta {_gatewayUdpPort})..."); Console.ResetColor();
             using var udpClient = new UdpClient(); uint seq = 1; var end = DateTime.Now.AddSeconds(10);
             while (_isRunning && DateTime.Now < end) {
                 var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = seq, DataSize = 256 };
                 byte[] b = new byte[16 + 256]; Buffer.BlockCopy(h.ToBytes(), 0, b, 0, 16); new Random().NextBytes(b.AsSpan(16).ToArray());
-                
                 await udpClient.SendAsync(b, b.Length, GATEWAY_IP, _gatewayUdpPort);
-                
-                if (seq % 10 == 0) Console.WriteLine($"[UDP] Frame {seq} gerado e enviado (256 bytes) >>");
-                seq++;
-                await Task.Delay(50);
+                if (seq % 10 == 0) Console.WriteLine($"[UDP] Frame {seq} enviado >>");
+                seq++; await Task.Delay(50);
             }
             _isStreamingVideo = false;
         }
@@ -155,7 +138,6 @@ namespace OneHealth.Sensor
             packet.CalculateAndSetChecksum();
             if (_stream != null) await _stream.WriteAsync(packet.ToBytes());
         }
-        
         private static async Task RunManualModeAsync() { while(true) await Task.Delay(1000); }
     }
 }
