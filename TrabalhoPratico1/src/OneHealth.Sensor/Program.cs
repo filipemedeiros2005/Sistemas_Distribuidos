@@ -11,8 +11,10 @@ namespace OneHealth.Sensor
     {
         private static uint _sensorId = 101; 
         private const string GATEWAY_IP = "127.0.0.1";
-        private const int GATEWAY_TCP_PORT = 5001;
-        private const int GATEWAY_UDP_PORT = 6000;
+        
+        // Portas dinâmicas para suportar múltiplos Gateways
+        private static int _gatewayTcpPort = 5001;
+        private static int _gatewayUdpPort = 6000;
 
         private static bool _isRunning = true;
         private static bool _isStreamingVideo = false;
@@ -21,14 +23,21 @@ namespace OneHealth.Sensor
 
         static async Task Main(string[] args)
         {
-            // 1. Processar Argumentos do Terminal (ID do Sensor e Modo)
+            // 1. Processar ID
             if (args.Length > 0 && uint.TryParse(args[0], out uint parsedId)) {
                 _sensorId = parsedId;
             }
             
+            // 2. Processar Modo
             string forceMode = (args.Length > 1 && args[1].ToLower() == "auto") ? "1" : "";
 
-            Console.WriteLine($"=== [SENSOR {_sensorId}] One Health ===");
+            // 3. Processar Porta do Gateway (Argumento 3 do Script)
+            if (args.Length > 2 && int.TryParse(args[2], out int gwPort)) {
+                _gatewayTcpPort = gwPort;
+                _gatewayUdpPort = gwPort + 999;
+            }
+
+            Console.WriteLine($"=== [SENSOR {_sensorId}] -> A ligar ao Gateway em TCP:{_gatewayTcpPort} / UDP:{_gatewayUdpPort} ===");
             
             Console.CancelKeyPress += (sender, e) => {
                 e.Cancel = true;
@@ -37,35 +46,27 @@ namespace OneHealth.Sensor
 
             try
             {
-                // 2. Ligar ao Gateway
                 _tcpClient = new TcpClient();
-                await _tcpClient.ConnectAsync(GATEWAY_IP, GATEWAY_TCP_PORT);
+                await _tcpClient.ConnectAsync(GATEWAY_IP, _gatewayTcpPort); // Ligação dinâmica
                 _stream = _tcpClient.GetStream();
 
                 var heloPacket = new TelemetryPacket { MsgType = MsgType.HELO, SensorID = _sensorId };
                 await SendPacketAsync(heloPacket);
                 Console.WriteLine($"[SENSOR {_sensorId}] HELO enviado. Ligação autorizada.");
 
-                // 3. Escolher o Modo
                 string opcao = forceMode;
                 if (string.IsNullOrEmpty(opcao))
                 {
                     Console.WriteLine("\nSelecione o modo de operação:");
-                    Console.WriteLine("1. Modo Automático (Ler do CSV ou Simulação EMA)");
+                    Console.WriteLine("1. Modo Automático (Algoritmo 3-Sigma via CSV)");
                     Console.WriteLine("2. Modo Manual (Inserir dados via teclado)");
                     Console.Write("Opção: ");
                     opcao = Console.ReadLine() ?? "1";
                     Console.WriteLine();
                 }
 
-                if (opcao == "1")
-                {
-                    await RunAutoSimulationAsync();
-                }
-                else
-                {
-                    await RunManualModeAsync();
-                }
+                if (opcao == "1") await RunAutoSimulationAsync();
+                else await RunManualModeAsync();
             }
             catch (Exception ex)
             {
@@ -77,57 +78,83 @@ namespace OneHealth.Sensor
             }
         }
 
-        // --- MODO AUTOMÁTICO (Prioriza CSV, cai para EMA se não existir) ---
+        // --- MODO AUTOMÁTICO (O Algoritmo 3-Sigma analisa os dados do CSV) ---
         private static async Task RunAutoSimulationAsync()
         {
-            // Tenta encontrar o CSV na pasta data/simulation/
             string csvPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "simulation", $"sensor_{_sensorId}.csv"));
 
             if (File.Exists(csvPath))
             {
-                Console.WriteLine($"[INFO] Ficheiro CSV encontrado para o Sensor {_sensorId}. A iniciar reprodução...");
+                Console.WriteLine($"[INFO] CSV detetado ({csvPath}). A iniciar Algoritmo 3-Sigma...");
                 var linhas = await File.ReadAllLinesAsync(csvPath);
                 
+                // Variáveis do Algoritmo Estatístico
+                float alpha = 0.2f; // Peso do dado atual
+                float ema = 0f;     // Média Móvel Exponencial
+                float emaVar = 1f;  // Variância Móvel Exponencial (Começa em 1 para evitar divisão por zero inicial)
+                bool primeiraLeitura = true;
+                int leiturasCount = 0;
+
                 foreach (var linha in linhas)
                 {
                     if (!_isRunning) break;
                     if (string.IsNullOrWhiteSpace(linha) || linha.StartsWith("Tipo")) continue;
 
                     var partes = linha.Split(',');
-                    if (partes.Length >= 3)
+                    if (partes.Length >= 2 && Enum.TryParse(partes[0], out DataType tipo) && float.TryParse(partes[1], out float rawValue))
                     {
-                        if (Enum.TryParse(partes[0], out DataType tipo) && 
-                            float.TryParse(partes[1], out float valor) &&
-                            bool.TryParse(partes[2], out bool isAlerta))
+                        if (primeiraLeitura) { ema = rawValue; primeiraLeitura = false; }
+
+                        leiturasCount++;
+
+                        // O VERDADEIRO ALGORITMO 3-SIGMA
+                        float desvioPadrao = (float)Math.Sqrt(emaVar);
+                        
+                        // Limitador base: O desvio padrão não deve ser minúsculo, para evitar que um aumento de 0.1 dispare alertas
+                        float threshold = Math.Max(3 * desvioPadrao, 5.0f); 
+                        float diferenca = Math.Abs(rawValue - ema);
+
+                        // Só começamos a detetar anomalias após 3 leituras para o modelo estabilizar
+                        bool isAlerta = (diferenca > threshold) && (leiturasCount > 3); 
+
+                        if (isAlerta) 
                         {
-                            var packet = new TelemetryPacket
-                            {
-                                MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA,
-                                DataType = tipo,
-                                SensorID = _sensorId,
-                                TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                                Value = valor
-                            };
-
-                            if (isAlerta) TriggerEmergencyVideo();
-
-                            await SendPacketAsync(packet);
-                            Console.WriteLine($"[AUTO-CSV] {packet.MsgType} | {tipo}: {valor:F2}");
+                            TriggerEmergencyVideo();
+                            // Em caso de anomalia, NÃO atualizamos a média nem a variância, para não "envenenar" o nosso modelo de normalidade.
                         }
+                        else
+                        {
+                            // Se for um dado normal, atualiza a Média (EMA) e a Variância (EMV)
+                            float diff = rawValue - ema;
+                            ema = ema + alpha * diff;
+                            emaVar = (1.0f - alpha) * (emaVar + alpha * diff * diff);
+                        }
+
+                        var packet = new TelemetryPacket
+                        {
+                            MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA,
+                            DataType = tipo,
+                            SensorID = _sensorId,
+                            TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                            Value = rawValue
+                        };
+
+                        await SendPacketAsync(packet);
+                        Console.WriteLine($"[3-SIGMA] {packet.MsgType} | {tipo}: {rawValue:F2} (Média: {ema:F2} | Limite: ±{threshold:F2})");
                     }
-                    await Task.Delay(5000); // Ritmo de envio de 5 segundos
+                    await Task.Delay(5000); 
                 }
                 Console.WriteLine("[INFO] Ficheiro CSV concluído. A manter ligação ativa.");
                 while (_isRunning) await Task.Delay(1000);
             }
             else
             {
-                Console.WriteLine($"[AVISO] CSV não encontrado ({csvPath}). A iniciar Simulação Matemática (EMA)...");
+                Console.WriteLine($"[AVISO] CSV não encontrado ({csvPath}). A iniciar Simulação Aleatória...");
                 await RunEmaSimulationAsync();
             }
         }
 
-        // --- MODO EMA (Matemático de contingência) ---
+        // --- MODO EMA ALEATÓRIO (Fallback) ---
         private static async Task RunEmaSimulationAsync()
         {
             float alpha = 0.2f; float ema = 20.0f; var rnd = new Random();
@@ -192,7 +219,7 @@ namespace OneHealth.Sensor
         private static void TriggerEmergencyVideo()
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("⚠️ [SENSOR] ANOMALIA DETETADA!");
+            Console.WriteLine("⚠️ [SENSOR] ANOMALIA DETETADA PELO ALGORITMO!");
             Console.ResetColor();
 
             if (!_isStreamingVideo)
@@ -220,7 +247,8 @@ namespace OneHealth.Sensor
                 Buffer.BlockCopy(headerBytes, 0, fullPacket, 0, headerBytes.Length);
                 Buffer.BlockCopy(fakePayload, 0, fullPacket, headerBytes.Length, fakePayload.Length);
 
-                await udpClient.SendAsync(fullPacket, fullPacket.Length, GATEWAY_IP, GATEWAY_UDP_PORT);
+                // Envia para a porta UDP do Gateway correspondente
+                await udpClient.SendAsync(fullPacket, fullPacket.Length, GATEWAY_IP, _gatewayUdpPort);
                 await Task.Delay(50); // 20 FPS
             }
             Console.WriteLine("[VÍDEO] Transmissão concluída.");

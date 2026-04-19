@@ -1,3 +1,4 @@
+#nullable enable
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -15,6 +16,7 @@ public partial class MainWindow : Window
     
     public ObservableCollection<string> Alertas { get; set; } = new();
     public ObservableCollection<string> Sensores { get; set; } = new();
+    public ObservableCollection<string> TelemetriaGlobal { get; set; } = new(); 
     
     private DispatcherTimer _timer;
 
@@ -23,8 +25,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         LstAlerts.ItemsSource = Alertas;
         LstSensors.ItemsSource = Sensores;
+        LstTelemetry.ItemsSource = TelemetriaGlobal; 
         
-        // Ligação do botão feita no C# para evitar erros do compilador XAML
         BtnStream.Click += BtnStream_Click;
         
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -42,12 +44,37 @@ public partial class MainWindow : Window
             conn.Open();
             CarregarSensores(conn);
             CarregarAlertas(conn);
+            CarregarDados(conn); 
         }
         catch (Exception ex)
         {
             Sensores.Clear();
             Sensores.Add($"[ERRO DB] Sem ligação ao PostgreSQL: {ex.Message}");
         }
+    }
+
+    private void CarregarDados(NpgsqlConnection conn) 
+    {
+        try 
+        {
+            // ABA 2: Telemetria Global (Filtra apenas dados úteis, ignora STATUS/HELO/BYE)
+            TelemetriaGlobal.Clear();
+            using var cmdAll = new NpgsqlCommand("SELECT timestamp, sensor_id, data_type, value FROM telemetry WHERE msg_type IN ('DATA', 'ALERT') ORDER BY id DESC LIMIT 15", conn);
+            using var readerAll = cmdAll.ExecuteReader();
+            while(readerAll.Read()) 
+                TelemetriaGlobal.Add($"[{readerAll.GetDateTime(0):HH:mm:ss}] Sensor {readerAll.GetInt64(1)} -> {readerAll.GetString(2)}: {readerAll.GetFloat(3):F2}");
+            readerAll.Close();
+
+            // ABA 3: Alert Stats (Prova do tráfego de Vídeo na Borda)
+            string videoPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "videos", "S101_Recording.raw"));
+            if (File.Exists(videoPath)) {
+                var info = new FileInfo(videoPath);
+                // Exibe o peso do ficheiro em KB para provar o transporte de bytes UDP
+                if (TxtVideoStats != null)
+                    TxtVideoStats.Text = $"📁 Backup de Vídeo na Borda (S101): {info.Length / 1024} KB recebidos via UDP.";
+            }
+        } 
+        catch { }
     }
 
     private void CarregarSensores(NpgsqlConnection conn)
@@ -101,18 +128,13 @@ public partial class MainWindow : Window
         try
         {
             string videoPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "S101_CCTV.mp4"));
-            
             if (File.Exists(videoPath))
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = videoPath,
-                    UseShellExecute = true
-                });
+                Process.Start(new ProcessStartInfo { FileName = videoPath, UseShellExecute = true });
             }
             else
             {
-                Sensores.Insert(0, $"⚠️ Erro: Vídeo não encontrado em {videoPath}");
+                Alertas.Insert(0, $"⚠️ Erro: Vídeo não encontrado em {videoPath}");
             }
         }
         catch { }

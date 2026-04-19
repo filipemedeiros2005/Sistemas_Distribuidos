@@ -49,7 +49,6 @@ namespace OneHealth.Server
                 using var conn = new NpgsqlConnection(DB_CONNECTION);
                 conn.Open();
                 
-                // Criação da Tabela (se não existir)
                 using var cmd = new NpgsqlCommand(@"
                     CREATE TABLE IF NOT EXISTS telemetry (
                         id SERIAL PRIMARY KEY,
@@ -58,16 +57,20 @@ namespace OneHealth.Server
                         data_type VARCHAR(20) NOT NULL,
                         value REAL NOT NULL,
                         timestamp TIMESTAMP NOT NULL
-                    )", conn);
+                    );
+                    -- Este comando limpa a tabela toda sempre que o servidor liga! 
+                    -- Excelente para garantir um Dashboard limpo na apresentação.
+                    TRUNCATE TABLE telemetry RESTART IDENTITY;
+                ", conn);
+                
                 cmd.ExecuteNonQuery();
-                Console.WriteLine("[DB] PostgreSQL conectado e tabela verificada.");
+                Console.WriteLine("[DB] PostgreSQL conectado e tabela LIMPA para a apresentação.");
             }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[DB ERRO FATAL] Não foi possível ligar ao Postgres. Confirma se o serviço está a correr. Erro: {ex.Message}");
+                Console.WriteLine($"[DB ERRO FATAL] {ex.Message}");
                 Console.ResetColor();
-                // Opcional: Environment.Exit(1); // Se quiseres que o servidor não arranque sem BD
             }
         }
 

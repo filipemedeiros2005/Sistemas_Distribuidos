@@ -1,27 +1,22 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="OneHealth.Dashboard.MainWindow"
-        Title="One Health - Edge Command Center" 
-        Width="900" Height="650"
-        Background="#121212">
-    
+        Title="One Health - Command Center" Width="950" Height="700" Background="#121212">
     <StackPanel Margin="20" Spacing="10">
-        <TextBlock Text="🌍 One Health - Centro de Monitorização" FontSize="26" FontWeight="Bold" Foreground="#3498db"/>
-        
-        <StackPanel Orientation="Horizontal" Spacing="20" Margin="0,0,0,10">
-            <TextBlock Text="Sincronização em tempo real (1s) com PostgreSQL | Gateways de Borda Ativos" 
-                       Foreground="#aaaaaa" VerticalAlignment="Center"/>
-            
-            <Button Name="BtnStream" Content="📹 Ver Feed de Vídeo (CCTV)" 
-                    Background="#c0392b" Foreground="White" Padding="10,5"/>
-        </StackPanel>
-        
-        <TabControl Background="#1e1e1e" Height="500">
-            <TabItem Header="Estado dos Sensores" Foreground="White" FontSize="16">
-                <ListBox Name="LstSensors" Background="#1e1e1e" Foreground="White" FontSize="18" Padding="10" CornerRadius="5"/>
+        <TextBlock Text="🌍 One Health - Gestão Urbana" FontSize="26" FontWeight="Bold" Foreground="#3498db"/>
+        <TabControl Background="#1e1e1e" Height="550">
+            <TabItem Header="Sensores (Estado)">
+                <ListBox Name="LstSensors" Background="#1e1e1e" Foreground="White" FontSize="18"/>
             </TabItem>
-            <TabItem Header="Registo de Anomalias" Foreground="White" FontSize="16">
-                <ListBox Name="LstAlerts" Background="#1e1e1e" Foreground="#e74c3c" FontSize="16" Padding="10" CornerRadius="5"/>
+            <TabItem Header="Telemetria Real-Time">
+                <ListBox Name="LstTelemetry" Background="#1e1e1e" Foreground="#3498db" FontSize="14"/>
+            </TabItem>
+            <TabItem Header="Incidentes &amp; Vídeo">
+                <StackPanel Spacing="10">
+                    <TextBlock Name="TxtVideoStats" Text="Aguardando anomalias..." Foreground="#e67e22" FontSize="16" Margin="10"/>
+                    <ListBox Name="LstAlerts" Height="350" Background="#1e1e1e" Foreground="#e74c3c"/>
+                    <Button Name="BtnStream" Content="📹 Abrir Player de Vídeo (Análise de Incidente)" HorizontalAlignment="Center" Background="#c0392b" Foreground="White" Padding="15,10"/>
+                </StackPanel>
             </TabItem>
         </TabControl>
     </StackPanel>
