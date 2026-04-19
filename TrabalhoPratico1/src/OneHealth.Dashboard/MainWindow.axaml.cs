@@ -64,7 +64,8 @@ public partial class MainWindow : Window
         TelemetriaGlobal.Clear(); 
         Alertas.Clear();
         
-        using var cmdAll = new NpgsqlCommand("SELECT timestamp, sensor_id, data_type, value, msg_type FROM telemetry ORDER BY timestamp DESC LIMIT 20", conn);
+        // AUMENTADO PARA 100 REGISTOS!
+        using var cmdAll = new NpgsqlCommand("SELECT timestamp, sensor_id, data_type, value, msg_type FROM telemetry ORDER BY timestamp DESC LIMIT 100", conn);
         using var readerAll = cmdAll.ExecuteReader();
         while(readerAll.Read()) {
             string msg = readerAll.GetString(4);
@@ -75,7 +76,6 @@ public partial class MainWindow : Window
         }
         readerAll.Close();
 
-        // Pesquisa dinamica para evitar o erro CS0103 de compilacao do Avalonia
         var txtGateway = this.FindControl<TextBlock>("TxtGatewayStats");
         var txtServer = this.FindControl<TextBlock>("TxtServerStats");
 

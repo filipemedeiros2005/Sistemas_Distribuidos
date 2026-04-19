@@ -18,20 +18,24 @@
             </TabItem>
             
             <TabItem Header="Telemetria Real-Time">
-                <ListBox Name="LstTelemetry" Background="#1e1e1e" Foreground="#3498db" FontSize="14"/>
+                <ScrollViewer>
+                    <ListBox Name="LstTelemetry" Background="#1e1e1e" Foreground="#3498db" FontSize="14"/>
+                </ScrollViewer>
             </TabItem>
             
             <TabItem Header="Incidentes (Anomalias)">
-                <ListBox Name="LstAlerts" Background="#1e1e1e">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="local:AlertaItem">
-                            <StackPanel Orientation="Horizontal" Spacing="15" Margin="0,5">
-                                <TextBlock Text="{Binding Texto}" Foreground="#e74c3c" FontSize="16" VerticalAlignment="Center" Width="600"/>
-                                <Button Content="Ver Video" Click="BtnVerVideo_Click" Background="#c0392b" Foreground="White" Padding="10,5"/>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <ScrollViewer>
+                    <ListBox Name="LstAlerts" Background="#1e1e1e">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="local:AlertaItem">
+                                <StackPanel Orientation="Horizontal" Spacing="15" Margin="0,5">
+                                    <TextBlock Text="{Binding Texto}" Foreground="#e74c3c" FontSize="16" VerticalAlignment="Center" Width="600"/>
+                                    <Button Content="Ver Video" Click="BtnVerVideo_Click" Background="#c0392b" Foreground="White" Padding="10,5"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </ScrollViewer>
             </TabItem>
         </TabControl>
     </StackPanel>
