@@ -4,7 +4,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
-using Npgsql; // Biblioteca do Postgres
+using Npgsql;
 using OneHealth.Common;
 
 namespace OneHealth.Server
@@ -12,14 +12,11 @@ namespace OneHealth.Server
     class Program
     {
         private const int SERVER_PORT = 5005;
-        // String de ligação ao PostgreSQL (Ajusta a password se necessário)
         private const string DB_CONNECTION = "Host=localhost;Username=postgres;Password=postgres;Database=onehealth";
 
         static async Task Main(string[] args)
         {
             Console.WriteLine("=== [SERVIDOR CENTRAL ONE HEALTH (POSTGRESQL)] ===");
-
-            // Inicializar Base de Dados
             InitDatabase();
             
             TcpListener listener = new TcpListener(IPAddress.Any, SERVER_PORT);
@@ -28,71 +25,46 @@ namespace OneHealth.Server
 
             while (true)
             {
-                try
-                {
+                try {
                     TcpClient client = await listener.AcceptTcpClientAsync();
-                    string gatewayEndpoint = client.Client.RemoteEndPoint?.ToString() ?? "IP Desconhecido";
-                    Console.WriteLine($"[REDE] Novo Gateway conectado: {gatewayEndpoint}");
-                    _ = Task.Run(() => HandleGatewayAsync(client, gatewayEndpoint));
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[ERRO REDE] Falha ao aceitar conexão: {ex.Message}");
-                }
+                    Console.WriteLine($"[REDE] Novo Gateway conectado: {client.Client.RemoteEndPoint}");
+                    _ = Task.Run(() => HandleGatewayAsync(client));
+                } catch { }
             }
         }
 
         private static void InitDatabase()
         {
-            try
-            {
+            try {
                 using var conn = new NpgsqlConnection(DB_CONNECTION);
                 conn.Open();
-                
                 using var cmd = new NpgsqlCommand(@"
                     CREATE TABLE IF NOT EXISTS telemetry (
-                        id SERIAL PRIMARY KEY,
-                        sensor_id BIGINT NOT NULL,
-                        msg_type VARCHAR(20) NOT NULL,
-                        data_type VARCHAR(20) NOT NULL,
-                        value REAL NOT NULL,
-                        timestamp TIMESTAMP NOT NULL
+                        id SERIAL PRIMARY KEY, sensor_id BIGINT NOT NULL, msg_type VARCHAR(20) NOT NULL,
+                        data_type VARCHAR(20) NOT NULL, value REAL NOT NULL, timestamp TIMESTAMP NOT NULL
                     );
-                    -- Este comando limpa a tabela toda sempre que o servidor liga! 
-                    -- Excelente para garantir um Dashboard limpo na apresentação.
-                    TRUNCATE TABLE telemetry RESTART IDENTITY;
+                    CREATE TABLE IF NOT EXISTS sensor_status (
+                        sensor_id BIGINT PRIMARY KEY, status VARCHAR(20), last_seen TIMESTAMP
+                    );
+                    TRUNCATE TABLE telemetry, sensor_status RESTART IDENTITY;
                 ", conn);
-                
                 cmd.ExecuteNonQuery();
-                Console.WriteLine("[DB] PostgreSQL conectado e tabela LIMPA para a apresentação.");
+                Console.WriteLine("[DB] Tabelas prontas e limpas para a defesa.");
             }
-            catch (Exception ex)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[DB ERRO FATAL] {ex.Message}");
-                Console.ResetColor();
-            }
+            catch (Exception ex) { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ERRO DB] {ex.Message}"); Console.ResetColor(); }
         }
 
-        private static async Task HandleGatewayAsync(TcpClient client, string endpoint)
+        private static async Task HandleGatewayAsync(TcpClient client)
         {
-            using (client)
-            using (NetworkStream stream = client.GetStream())
+            using (client) using (NetworkStream stream = client.GetStream())
             {
                 byte[] buffer = new byte[20]; 
-                while (true)
-                {
-                    try 
-                    {
-                        int bytesRead = await ReadExactlyAsync(stream, buffer, 20);
-                        if (bytesRead == 0) break;
+                while (true) {
+                    int bytesRead = await ReadExactlyAsync(stream, buffer, 20);
+                    if (bytesRead == 0) break;
 
-                        TelemetryPacket packet = TelemetryPacket.FromBytes(buffer);
-                        if (!packet.IsValid()) continue; 
-
-                        ProcessPacket(packet);
-                    }
-                    catch { break; }
+                    TelemetryPacket packet = TelemetryPacket.FromBytes(buffer);
+                    if (packet.IsValid()) ProcessPacket(packet);
                 }
             }
         }
@@ -101,59 +73,54 @@ namespace OneHealth.Server
         {
             DateTime time = DateTimeOffset.FromUnixTimeSeconds(packet.TimeStamp).LocalDateTime;
             
-            if (packet.MsgType == MsgType.STATUS) {
-                Console.WriteLine($"ℹ️  [STATUS UPDATE] Sensor {packet.SensorID} reportado como INATIVO/ATIVO.");
+            if (packet.MsgType == MsgType.HELO || (packet.MsgType == MsgType.STATUS && packet.Value == 1)) {
+                UpdateStatus(packet.SensorID, "ONLINE", time);
+                Console.WriteLine($"ℹ️ [ESTADO] Sensor {packet.SensorID} ONLINE");
                 return;
             }
-            
-            if (packet.MsgType == MsgType.BYE) {
-                Console.WriteLine($"[DESCONEXÃO] Sensor {packet.SensorID} saiu.");
+            if (packet.MsgType == MsgType.BYE || (packet.MsgType == MsgType.STATUS && packet.Value == 0)) {
+                UpdateStatus(packet.SensorID, "OFFLINE", time);
+                Console.WriteLine($"ℹ️ [ESTADO] Sensor {packet.SensorID} OFFLINE");
                 return;
             }
 
-            if (packet.MsgType == MsgType.ALERT)
-                Console.WriteLine($"⚠️ [ALERTA] SensorID: {packet.SensorID} | Valor: {packet.Value:F2}");
-            else
-                Console.WriteLine($"[TELEMETRIA] SensorID: {packet.SensorID} | Valor: {packet.Value:F2}");
+            if (packet.MsgType == MsgType.ALERT) Console.WriteLine($"⚠️ [ALERTA] S{packet.SensorID} | {packet.DataType}: {packet.Value:F2}");
+            else Console.WriteLine($"[DADOS] S{packet.SensorID} | {packet.DataType}: {packet.Value:F2}");
 
-            // Gravar na Base de Dados Postgres
-            SaveToDatabase(packet, time);
+            SaveTelemetry(packet, time);
         }
 
-        private static void SaveToDatabase(TelemetryPacket packet, DateTime time)
+        private static void UpdateStatus(uint sensorId, string status, DateTime time)
         {
-            try
-            {
-                using var conn = new NpgsqlConnection(DB_CONNECTION);
-                conn.Open();
+            try {
+                using var conn = new NpgsqlConnection(DB_CONNECTION); conn.Open();
                 using var cmd = new NpgsqlCommand(@"
-                    INSERT INTO telemetry (sensor_id, msg_type, data_type, value, timestamp) 
-                    VALUES (@s_id, @m_type, @d_type, @val, @ts)", conn);
-                
-                cmd.Parameters.AddWithValue("s_id", (long)packet.SensorID);
-                cmd.Parameters.AddWithValue("m_type", packet.MsgType.ToString());
-                cmd.Parameters.AddWithValue("d_type", packet.DataType.ToString());
-                cmd.Parameters.AddWithValue("val", packet.Value);
+                    INSERT INTO sensor_status (sensor_id, status, last_seen) 
+                    VALUES (@id, @st, @ts) 
+                    ON CONFLICT (sensor_id) DO UPDATE SET status = EXCLUDED.status, last_seen = EXCLUDED.last_seen", conn);
+                cmd.Parameters.AddWithValue("id", (long)sensorId);
+                cmd.Parameters.AddWithValue("st", status);
                 cmd.Parameters.AddWithValue("ts", time);
-                
                 cmd.ExecuteNonQuery();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[DB ERRO] Falha ao inserir: {ex.Message}");
-            }
+            } catch(Exception e) { Console.WriteLine("[ERRO UPDATE DB] " + e.Message); }
         }
 
-        private static async Task<int> ReadExactlyAsync(NetworkStream stream, byte[] buffer, int count)
+        private static void SaveTelemetry(TelemetryPacket packet, DateTime time)
         {
-            int totalRead = 0;
-            while (totalRead < count)
-            {
-                int read = await stream.ReadAsync(buffer, totalRead, count - totalRead);
-                if (read == 0) return 0; 
-                totalRead += read;
-            }
-            return totalRead;
+            try {
+                using var conn = new NpgsqlConnection(DB_CONNECTION); conn.Open();
+                using var cmd = new NpgsqlCommand("INSERT INTO telemetry (sensor_id, msg_type, data_type, value, timestamp) VALUES (@id, @m, @d, @v, @ts)", conn);
+                cmd.Parameters.AddWithValue("id", (long)packet.SensorID);
+                cmd.Parameters.AddWithValue("m", packet.MsgType.ToString());
+                cmd.Parameters.AddWithValue("d", packet.DataType.ToString());
+                cmd.Parameters.AddWithValue("v", packet.Value);
+                cmd.Parameters.AddWithValue("ts", time);
+                cmd.ExecuteNonQuery();
+            } catch(Exception e) { Console.WriteLine("[ERRO SAVE DB] " + e.Message); }
+        }
+
+        private static async Task<int> ReadExactlyAsync(NetworkStream stream, byte[] buffer, int count) {
+            int total = 0; while (total < count) { int read = await stream.ReadAsync(buffer, total, count - total); if (read == 0) return 0; total += read; } return total;
         }
     }
 }
