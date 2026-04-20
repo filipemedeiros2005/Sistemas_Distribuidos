@@ -215,9 +215,9 @@ namespace OneHealth.Sensor
                 byte[] packet = new byte[16 + 256];
                 Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
                 
-                // Simular um padrão de vídeo no payload para ser legível (neste caso, gradação para ser recuperada e mostrada)
-                byte visualIntensity = (byte)(sequenceNum % 255);
-                for(int i=16; i<packet.Length; i++) packet[i] = visualIntensity;
+                var rnd = new Random();
+                // Simular um padrão de vídeo com ruído denso e normal (TV estática escura)
+                for(int i=16; i<packet.Length; i++) packet[i] = (byte)rnd.Next(30, 100);
 
                 _videoBuffer.Enqueue(packet);
                 if (_videoBuffer.Count > MAX_FRAMES_IN_BUFFER) {
@@ -250,8 +250,9 @@ namespace OneHealth.Sensor
                 byte[] packet = new byte[16 + 256];
                 Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
                 
-                byte visualIntensity = 255; // Branco total = alerta
-                for(int i=16; i<packet.Length; i++) packet[i] = visualIntensity;
+                var rnd = new Random();
+                // Ruído agressivo brilhante pós anomalia (CCTV comprometida)
+                for(int i=16; i<packet.Length; i++) packet[i] = (byte)rnd.Next(150, 256);
 
                 await udpClient.SendAsync(packet, packet.Length, GATEWAY_IP, _gatewayUdpPort);
                 if (lastSeq % 20 == 0) Console.WriteLine($"[UDP] Frame pós-evento {lastSeq} enviado >>");
