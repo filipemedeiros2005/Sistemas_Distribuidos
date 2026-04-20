@@ -13,8 +13,8 @@ namespace OneHealth.Dashboard
     public class RawVideoPlayerWindow : Window
     {
         private Image _imageView;
-        private DispatcherTimer _timer;
-        private FileStream _fs;
+        private DispatcherTimer? _timer;
+        private FileStream? _fs;
         private byte[] _buffer = new byte[272]; // 16 bytes de header + 256 bytes de cor (frame)
         private int _width = 16;
         private int _height = 16;
