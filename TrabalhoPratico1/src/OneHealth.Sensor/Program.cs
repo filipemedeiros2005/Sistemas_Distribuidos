@@ -65,9 +65,10 @@ namespace OneHealth.Sensor
 
             while (_isRunning) 
             {
-                float alpha = 0.2f, ema = 0f, emaVar = 1f;
-                bool primeiraLeitura = true;
-                int leiturasCount = 0;
+                var emaDict = new Dictionary<DataType, float>();
+                var emaVarDict = new Dictionary<DataType, float>();
+                var leiturasCountDict = new Dictionary<DataType, int>();
+                float alpha = 0.2f;
 
                 foreach (var linha in linhas)
                 {
@@ -78,17 +79,21 @@ namespace OneHealth.Sensor
 
                     if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(valorFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue))
                     {
-                        if (primeiraLeitura) { ema = rawValue; primeiraLeitura = false; }
-                        leiturasCount++;
+                        if (!emaDict.ContainsKey(tipo)) {
+                            emaDict[tipo] = rawValue;
+                            emaVarDict[tipo] = 1f;
+                            leiturasCountDict[tipo] = 0;
+                        }
+                        leiturasCountDict[tipo]++;
 
                         float baseThreshold = 5.0f;
                         if (tipo == DataType.Lum) baseThreshold = 200.0f;
                         if (tipo == DataType.Ruido) baseThreshold = 25.0f;
                         if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 20.0f;
 
-                        float desvioPadrao = (float)Math.Sqrt(emaVar);
+                        float desvioPadrao = (float)Math.Sqrt(emaVarDict[tipo]);
                         float threshold = Math.Max(3 * desvioPadrao, baseThreshold); 
-                        bool isAlerta = (Math.Abs(rawValue - ema) > threshold) && (leiturasCount > 2); 
+                        bool isAlerta = (Math.Abs(rawValue - emaDict[tipo]) > threshold) && (leiturasCountDict[tipo] > 2); 
 
                         var packet = new TelemetryPacket {
                             MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA, DataType = tipo, SensorID = _sensorId,
@@ -96,18 +101,18 @@ namespace OneHealth.Sensor
                         };
 
                         if (isAlerta) {
-                            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ALERTA 3-SIGMA] Pico de {rawValue:F2} detetado!"); Console.ResetColor();
+                            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ALERTA 3-SIGMA] Pico de {rawValue:F2} ({tipo}) detetado!"); Console.ResetColor();
                             TriggerEmergencyVideo();
                             foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                             _bufferRotina.Clear();
                             await SendPacketAsync(packet);
 
-                            ema = rawValue;
-                            emaVar = 1f;
-                            leiturasCount = 0;
+                            emaDict[tipo] = rawValue;
+                            emaVarDict[tipo] = 1f;
+                            leiturasCountDict[tipo] = 0;
                         } else {
-                            ema = ema + alpha * (rawValue - ema);
-                            emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
+                            emaDict[tipo] = emaDict[tipo] + alpha * (rawValue - emaDict[tipo]);
+                            emaVarDict[tipo] = (1.0f - alpha) * (emaVarDict[tipo] + alpha * ((rawValue - emaDict[tipo]) * (rawValue - emaDict[tipo])));
                             
                             _bufferRotina.Add(packet);
                             Console.WriteLine($"[DADO NORMAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/10)");
@@ -129,9 +134,10 @@ namespace OneHealth.Sensor
             Console.WriteLine("Exemplo: Temp 35.5");
             Console.WriteLine("Tipos permitidos: Temp, Hum, Ruido, PM10, PM25, Lum");
 
-            float alpha = 0.2f, ema = 0f, emaVar = 1f;
-            bool primeiraLeitura = true;
-            int leiturasCount = 0;
+            var emaDict = new Dictionary<DataType, float>();
+            var emaVarDict = new Dictionary<DataType, float>();
+            var leiturasCountDict = new Dictionary<DataType, int>();
+            float alpha = 0.2f;
 
             while (_isRunning) {
                 Console.Write("\n> ");
@@ -143,17 +149,21 @@ namespace OneHealth.Sensor
                     string valFormatado = parts[1].Replace(',', '.');
                     if (float.TryParse(valFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue)) {
                         
-                        if (primeiraLeitura) { ema = rawValue; primeiraLeitura = false; }
-                        leiturasCount++;
+                        if (!emaDict.ContainsKey(tipo)) {
+                            emaDict[tipo] = rawValue;
+                            emaVarDict[tipo] = 1f;
+                            leiturasCountDict[tipo] = 0;
+                        }
+                        leiturasCountDict[tipo]++;
 
                         float baseThreshold = 5.0f;
                         if (tipo == DataType.Lum) baseThreshold = 200.0f;
                         if (tipo == DataType.Ruido) baseThreshold = 25.0f;
                         if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 20.0f;
 
-                        float desvioPadrao = (float)Math.Sqrt(emaVar);
+                        float desvioPadrao = (float)Math.Sqrt(emaVarDict[tipo]);
                         float threshold = Math.Max(3 * desvioPadrao, baseThreshold); 
-                        bool isAlerta = (Math.Abs(rawValue - ema) > threshold) && (leiturasCount > 2); 
+                        bool isAlerta = (Math.Abs(rawValue - emaDict[tipo]) > threshold) && (leiturasCountDict[tipo] > 2); 
 
                         var packet = new TelemetryPacket {
                             MsgType = isAlerta ? MsgType.ALERT : MsgType.DATA, DataType = tipo, SensorID = _sensorId,
@@ -161,25 +171,26 @@ namespace OneHealth.Sensor
                         };
                         
                         if (isAlerta) {
-                            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ALERTA 3-SIGMA MANUAL] Pico de {rawValue:F2} detetado!"); Console.ResetColor();
+                            Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine($"[ALERTA 3-SIGMA MANUAL] Pico de {rawValue:F2} ({tipo}) detetado!"); Console.ResetColor();
                             TriggerEmergencyVideo();
                             foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                             _bufferRotina.Clear();
                             await SendPacketAsync(packet);
 
-                            ema = rawValue;
-                            emaVar = 1f;
-                            leiturasCount = 0;
+                            emaDict[tipo] = rawValue;
+                            emaVarDict[tipo] = 1f;
+                            leiturasCountDict[tipo] = 0;
                         } else {
-                            ema = ema + alpha * (rawValue - ema);
-                            emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
+                            emaDict[tipo] = emaDict[tipo] + alpha * (rawValue - emaDict[tipo]);
+                            emaVarDict[tipo] = (1.0f - alpha) * (emaVarDict[tipo] + alpha * ((rawValue - emaDict[tipo]) * (rawValue - emaDict[tipo])));
                             
                             _bufferRotina.Add(packet);
-                            Console.WriteLine($"[DADO NORMAL MANUAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/10)");
-                            if (_bufferRotina.Count >= 10) {
+                            int manualBatchSize = 1; // Resposta instantânea em modo interativo
+                            Console.WriteLine($"[DADO NORMAL MANUAL] {tipo}: {rawValue:F2} -> A enviar agora...");
+                            if (_bufferRotina.Count >= manualBatchSize) {
                                 foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                                 _bufferRotina.Clear();
-                                Console.WriteLine("[BATCH ENVIADO] Lote manual despachado (Otimização Energética).");
+                                Console.WriteLine("[BATCh ENVIADO] Despacho único executado.");
                             }
                         }
                     } else {

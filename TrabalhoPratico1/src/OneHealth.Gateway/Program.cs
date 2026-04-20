@@ -145,6 +145,9 @@ namespace OneHealth.Gateway
         
         private static async Task StartUdpVideoProxyAsync() {
             if (!Directory.Exists(VIDEO_DIR)) Directory.CreateDirectory(VIDEO_DIR);
+            else {
+                foreach(var file in Directory.GetFiles(VIDEO_DIR)) File.Delete(file);
+            }
             
             using var udpClient = new UdpClient(SENSOR_UDP_PORT);
             using var serverForwarder = new UdpClient(); // Cliente para enviar ao servidor
