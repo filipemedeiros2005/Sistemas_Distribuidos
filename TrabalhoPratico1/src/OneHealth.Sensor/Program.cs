@@ -77,12 +77,17 @@ namespace OneHealth.Sensor
                     var p = linha.Split(',');
                     string valorFormatado = p[1].Replace(',', '.');
 
-                    if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(valorFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue))
-                    {
                         if (!emaDict.ContainsKey(tipo)) {
-                            emaDict[tipo] = rawValue;
+                            switch (tipo) {
+                                case DataType.Temp: emaDict[tipo] = 20.0f; break;
+                                case DataType.Hum: emaDict[tipo] = 50.0f; break;
+                                case DataType.Ruido: emaDict[tipo] = 40.0f; break;
+                                case DataType.Lum: emaDict[tipo] = 100.0f; break;
+                                case DataType.PM25: case DataType.PM10: emaDict[tipo] = 10.0f; break;
+                                default: emaDict[tipo] = rawValue; break;
+                            }
                             emaVarDict[tipo] = 1f;
-                            leiturasCountDict[tipo] = 0;
+                            leiturasCountDict[tipo] = 2; // Forçar que a primeira leitura possa despontar alertas instantaneamente
                         }
                         leiturasCountDict[tipo]++;
 
@@ -146,13 +151,17 @@ namespace OneHealth.Sensor
                 
                 var parts = input.Split(' ');
                 if (parts.Length == 2 && Enum.TryParse(parts[0], true, out DataType tipo)) {
-                    string valFormatado = parts[1].Replace(',', '.');
-                    if (float.TryParse(valFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue)) {
-                        
                         if (!emaDict.ContainsKey(tipo)) {
-                            emaDict[tipo] = rawValue;
+                            switch (tipo) {
+                                case DataType.Temp: emaDict[tipo] = 20.0f; break;
+                                case DataType.Hum: emaDict[tipo] = 50.0f; break;
+                                case DataType.Ruido: emaDict[tipo] = 40.0f; break;
+                                case DataType.Lum: emaDict[tipo] = 100.0f; break;
+                                case DataType.PM25: case DataType.PM10: emaDict[tipo] = 10.0f; break;
+                                default: emaDict[tipo] = rawValue; break;
+                            }
                             emaVarDict[tipo] = 1f;
-                            leiturasCountDict[tipo] = 0;
+                            leiturasCountDict[tipo] = 2; // Para autorizar despoletar alerta log na 1ª leitura manual
                         }
                         leiturasCountDict[tipo]++;
 
@@ -185,12 +194,11 @@ namespace OneHealth.Sensor
                             emaVarDict[tipo] = (1.0f - alpha) * (emaVarDict[tipo] + alpha * ((rawValue - emaDict[tipo]) * (rawValue - emaDict[tipo])));
                             
                             _bufferRotina.Add(packet);
-                            int manualBatchSize = 1; // Resposta instantânea em modo interativo
-                            Console.WriteLine($"[DADO NORMAL MANUAL] {tipo}: {rawValue:F2} -> A enviar agora...");
-                            if (_bufferRotina.Count >= manualBatchSize) {
+                            Console.WriteLine($"[DADO NORMAL MANUAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/10)");
+                            if (_bufferRotina.Count >= 10) {
                                 foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                                 _bufferRotina.Clear();
-                                Console.WriteLine("[BATCh ENVIADO] Despacho único executado.");
+                                Console.WriteLine("[BATCh ENVIADO] Despacho em bloco (10) executado igual ao Automático.");
                             }
                         }
                     } else {
