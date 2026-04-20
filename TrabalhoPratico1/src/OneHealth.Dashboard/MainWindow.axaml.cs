@@ -94,8 +94,21 @@ public partial class MainWindow : Window
 
     public void BtnVerVideo_Click(object? sender, RoutedEventArgs e) {
         try {
-            string videoPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "S101_CCTV.mp4"));
-            if (File.Exists(videoPath)) Process.Start(new ProcessStartInfo { FileName = videoPath, UseShellExecute = true });
+            string cloudDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "server_live"));
+            string possibleVideo = Path.Combine(cloudDir, "LIVE_S101.raw");
+            string edgeDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "videos"));
+            string possibleEdge = Path.Combine(edgeDir, "S101_Recording.raw");
+            
+            string videoPathToPlay = File.Exists(possibleVideo) ? possibleVideo : possibleEdge;
+
+            if (File.Exists(videoPathToPlay)) {
+                var player = new RawVideoPlayerWindow(videoPathToPlay);
+                player.Show();
+            } else {
+                var msg = new Window { Title = "Erro", Width = 400, Height = 100, WindowStartupLocation = WindowStartupLocation.CenterScreen };
+                msg.Content = new TextBlock { Text = "Nenhum ficheiro RAW encontrado da anomalia deste sensor.", Margin = new Avalonia.Thickness(20), Foreground = Avalonia.Media.Brushes.White };
+                msg.Show();
+            }
         } catch { }
     }
 }

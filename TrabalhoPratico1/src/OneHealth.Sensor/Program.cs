@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -21,9 +21,12 @@ namespace OneHealth.Sensor
         private static TcpClient? _tcpClient;
         private static NetworkStream? _stream;
         private static readonly List<TelemetryPacket> _bufferRotina = new();
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<byte[]> _videoBuffer = new();
+        private static readonly int MAX_FRAMES_IN_BUFFER = 300; // 30s @ 10fps
 
         static async Task Main(string[] args)
         {
+            _ = Task.Run(() => BackgroundVideoCaptureTask());
             if (args.Length > 0 && uint.TryParse(args[0], out uint parsedId)) _sensorId = parsedId;
             
             string modoOperacao = args.Length > 1 ? args[1].ToLower() : "auto";
@@ -107,11 +110,11 @@ namespace OneHealth.Sensor
                             emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
                             
                             _bufferRotina.Add(packet);
-                            Console.WriteLine($"[DADO NORMAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/2)");
-                            if (_bufferRotina.Count >= 2) {
+                            Console.WriteLine($"[DADO NORMAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/10)");
+                            if (_bufferRotina.Count >= 10) {
                                 foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                                 _bufferRotina.Clear();
-                                Console.WriteLine("[BATCH ENVIADO] Lote despachado.");
+                                Console.WriteLine("[BATCH ENVIADO] Lote de 10 pacotes despachado (Otimização Energética).");
                             }
                         }
                     }
@@ -172,11 +175,11 @@ namespace OneHealth.Sensor
                             emaVar = (1.0f - alpha) * (emaVar + alpha * (rawValue - ema) * (rawValue - ema));
                             
                             _bufferRotina.Add(packet);
-                            Console.WriteLine($"[DADO NORMAL MANUAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/2)");
-                            if (_bufferRotina.Count >= 2) {
+                            Console.WriteLine($"[DADO NORMAL MANUAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/10)");
+                            if (_bufferRotina.Count >= 10) {
                                 foreach(var pkt in _bufferRotina) await SendPacketAsync(pkt);
                                 _bufferRotina.Clear();
-                                Console.WriteLine("[BATCH ENVIADO] Lote manual despachado.");
+                                Console.WriteLine("[BATCH ENVIADO] Lote manual despachado (Otimização Energética).");
                             }
                         }
                     } else {
@@ -192,15 +195,57 @@ namespace OneHealth.Sensor
             if (!_isStreamingVideo) { _isStreamingVideo = true; _ = Task.Run(() => StreamVideoUdpAsync()); }
         }
 
+        private static void BackgroundVideoCaptureTask()
+        {
+            uint sequenceNum = 1;
+            while (_isRunning)
+            {
+                var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = sequenceNum, DataSize = 256 };
+                byte[] packet = new byte[16 + 256];
+                Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
+                
+                // Simular um padrão de vídeo no payload para ser legível (neste caso, gradação para ser recuperada e mostrada)
+                byte visualIntensity = (byte)(sequenceNum % 255);
+                for(int i=16; i<packet.Length; i++) packet[i] = visualIntensity;
+
+                _videoBuffer.Enqueue(packet);
+                if (_videoBuffer.Count > MAX_FRAMES_IN_BUFFER) {
+                    _videoBuffer.TryDequeue(out _); // FIFO rotativo (30 segundos na RAM)
+                }
+
+                sequenceNum++;
+                System.Threading.Thread.Sleep(100); // 10 FPS
+            }
+        }
+
         private static async Task StreamVideoUdpAsync() {
-            Console.ForegroundColor = ConsoleColor.Yellow; Console.WriteLine($"[UDP] A transmitir Frames de Video (Porta {_gatewayUdpPort})..."); Console.ResetColor();
-            using var udpClient = new UdpClient(); uint seq = 1; var end = DateTime.Now.AddSeconds(10);
+            Console.ForegroundColor = ConsoleColor.Yellow; Console.WriteLine($"[UDP] A transmitir Frames de Video da RAM (Porta {_gatewayUdpPort})..."); Console.ResetColor();
+            using var udpClient = new UdpClient(); 
+            
+            // 1. DUMP DA RAM (30s)
+            var dump = _videoBuffer.ToArray();
+            foreach(var frame in dump) {
+                await udpClient.SendAsync(frame, frame.Length, GATEWAY_IP, _gatewayUdpPort);
+            }
+            Console.WriteLine($"[UDP] Dump da RAM Concluído ({dump.Length} frames pre-anomalia)");
+
+            // 2. Transmissão pós-anomalia contínua ao vivo (120s)
+            var end = DateTime.Now.AddSeconds(120);
+            uint lastSeq = dump.Length > 0 ? VideoPacketHeader.FromBytes(dump[^1]).SequenceNum : 0;
+            
             while (_isRunning && DateTime.Now < end) {
-                var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = seq, DataSize = 256 };
-                byte[] b = new byte[16 + 256]; Buffer.BlockCopy(h.ToBytes(), 0, b, 0, 16); new Random().NextBytes(b.AsSpan(16).ToArray());
-                await udpClient.SendAsync(b, b.Length, GATEWAY_IP, _gatewayUdpPort);
-                if (seq % 10 == 0) Console.WriteLine($"[UDP] Frame {seq} enviado >>");
-                seq++; await Task.Delay(50);
+                lastSeq++;
+                var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = lastSeq, DataSize = 256 };
+                byte[] packet = new byte[16 + 256];
+                Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
+                
+                byte visualIntensity = 255; // Branco total = alerta
+                for(int i=16; i<packet.Length; i++) packet[i] = visualIntensity;
+
+                await udpClient.SendAsync(packet, packet.Length, GATEWAY_IP, _gatewayUdpPort);
+                if (lastSeq % 20 == 0) Console.WriteLine($"[UDP] Frame pós-evento {lastSeq} enviado >>");
+                
+                await Task.Delay(100);
             }
             _isStreamingVideo = false;
         }

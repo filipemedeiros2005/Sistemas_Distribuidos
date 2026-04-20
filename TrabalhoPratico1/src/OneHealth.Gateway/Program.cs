@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -30,8 +30,8 @@ namespace OneHealth.Gateway
         private static TcpClient? _serverClient;
         private static NetworkStream? _serverStream;
 
-        private static readonly ConcurrentQueue<TelemetryPacket> _filaPrioridadeAlta = new();
-        private static readonly ConcurrentQueue<TelemetryPacket> _filaPrioridadeNormal = new();
+        private static readonly object _filaLock = new();
+        private static readonly PriorityQueue<TelemetryPacket, int> _filaPrioridade = new();
 
         static async Task Main(string[] args)
         {
@@ -79,15 +79,15 @@ namespace OneHealth.Gateway
                         
                         if (cfg.Estado.Contains("desativ")) { 
                             cfg.Estado = "ativo";
-                            _filaPrioridadeAlta.Enqueue(new TelemetryPacket { MsgType = MsgType.STATUS, SensorID = packet.SensorID, Value = 1, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                            lock (_filaLock) _filaPrioridade.Enqueue(new TelemetryPacket { MsgType = MsgType.STATUS, SensorID = packet.SensorID, Value = 1, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() }, 0);
                         }
                         cfg.LastSync = DateTime.Now;
                     }
 
                     if (packet.MsgType == MsgType.ALERT || packet.MsgType == MsgType.HELO || packet.MsgType == MsgType.BYE)
-                        _filaPrioridadeAlta.Enqueue(packet);
+                        lock (_filaLock) _filaPrioridade.Enqueue(packet, 0); // Prioridade Alta
                     else
-                        _filaPrioridadeNormal.Enqueue(packet);
+                        lock (_filaLock) _filaPrioridade.Enqueue(packet, 1); // Prioridade Normal
                 }
             }
         }
@@ -98,11 +98,18 @@ namespace OneHealth.Gateway
             {
                 try {
                     if (_serverStream != null) {
-                        if (_filaPrioridadeAlta.TryDequeue(out var pktAlta)) {
-                            await _serverStream.WriteAsync(pktAlta.ToBytes());
+                        bool temPacote = false;
+                        TelemetryPacket pacoteParaEnviar = default;
+
+                        lock (_filaLock) {
+                            if (_filaPrioridade.Count > 0) {
+                                pacoteParaEnviar = _filaPrioridade.Dequeue();
+                                temPacote = true;
+                            }
                         }
-                        else if (_filaPrioridadeNormal.TryDequeue(out var pktNormal)) {
-                            await _serverStream.WriteAsync(pktNormal.ToBytes());
+
+                        if (temPacote) {
+                            await _serverStream.WriteAsync(pacoteParaEnviar.ToBytes());
                         }
                         else {
                             await Task.Delay(10);
@@ -122,7 +129,7 @@ namespace OneHealth.Gateway
                 foreach (var sensor in _sensors.Values) {
                     if (sensor.Estado == "ativo" && (now - sensor.LastSync).TotalSeconds > 45) {
                         sensor.Estado = "desativado";
-                        _filaPrioridadeAlta.Enqueue(new TelemetryPacket { MsgType = MsgType.STATUS, SensorID = sensor.Id, Value = 0, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                        lock (_filaLock) _filaPrioridade.Enqueue(new TelemetryPacket { MsgType = MsgType.STATUS, SensorID = sensor.Id, Value = 0, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() }, 0);
                     }
                 }
             }
