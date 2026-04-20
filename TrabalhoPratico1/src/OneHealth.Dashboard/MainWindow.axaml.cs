@@ -94,10 +94,19 @@ public partial class MainWindow : Window
 
     public void BtnVerVideo_Click(object? sender, RoutedEventArgs e) {
         try {
+            string idString = "101"; 
+            if (sender is Button btn && btn.DataContext is AlertaItem item) {
+                if (item.Texto.Contains("Sensor ")) {
+                    int pStr = item.Texto.IndexOf("Sensor ") + 7;
+                    int pEnd = item.Texto.IndexOf(" ", pStr);
+                    if (pEnd > pStr) idString = item.Texto.Substring(pStr, pEnd - pStr);
+                }
+            }
+
             string cloudDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "server_live"));
-            string possibleVideo = Path.Combine(cloudDir, "LIVE_S101.raw");
+            string possibleVideo = Path.Combine(cloudDir, $"LIVE_S{idString}.raw");
             string edgeDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "videos"));
-            string possibleEdge = Path.Combine(edgeDir, "S101_Recording.raw");
+            string possibleEdge = Path.Combine(edgeDir, $"S{idString}_Recording.raw");
             
             string videoPathToPlay = File.Exists(possibleVideo) ? possibleVideo : possibleEdge;
 

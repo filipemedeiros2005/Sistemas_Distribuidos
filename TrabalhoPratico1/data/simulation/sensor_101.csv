@@ -1,5 +1,11 @@
-Temp,20.5,false
-Hum,55.0,false
+Temp,18.2,false
+Temp,18.5,false
+Hum,50.1,false
+Temp,19.0,false
+Temp,20.1,false
+Hum,51.0,false
+Temp,19.5,false
+Lum,210.0,false
 PM25,12.0,false
-Ruido,60.5,false
-Temp,45.0,true
+Temp,20.0,false
+Temp,75.0,true
