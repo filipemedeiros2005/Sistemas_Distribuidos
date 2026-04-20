@@ -94,6 +94,8 @@ namespace OneHealth.Sensor
                         leiturasCountDict[tipo]++;
 
                         float baseThreshold = 5.0f;
+                        if (tipo == DataType.Temp) baseThreshold = 15.0f; // Aceita 5ºC a 35ºC no primeiro valor
+                        if (tipo == DataType.Hum) baseThreshold = 25.0f;  // Aceita 25% a 75% no primeiro valor
                         if (tipo == DataType.Lum) baseThreshold = 200.0f;
                         if (tipo == DataType.Ruido) baseThreshold = 25.0f;
                         if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 20.0f;
@@ -171,6 +173,8 @@ namespace OneHealth.Sensor
                         leiturasCountDict[tipo]++;
 
                         float baseThreshold = 5.0f;
+                        if (tipo == DataType.Temp) baseThreshold = 15.0f;
+                        if (tipo == DataType.Hum) baseThreshold = 25.0f;
                         if (tipo == DataType.Lum) baseThreshold = 200.0f;
                         if (tipo == DataType.Ruido) baseThreshold = 25.0f;
                         if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 20.0f;
