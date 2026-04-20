@@ -94,11 +94,11 @@ namespace OneHealth.Sensor
                         leiturasCountDict[tipo]++;
 
                         float baseThreshold = 5.0f;
-                        if (tipo == DataType.Temp) baseThreshold = 15.0f; // Aceita 5ºC a 35ºC no primeiro valor
-                        if (tipo == DataType.Hum) baseThreshold = 25.0f;  // Aceita 25% a 75% no primeiro valor
-                        if (tipo == DataType.Lum) baseThreshold = 200.0f;
-                        if (tipo == DataType.Ruido) baseThreshold = 25.0f;
-                        if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 20.0f;
+                        if (tipo == DataType.Temp) baseThreshold = 40.0f; // Aceita de -20ºC a 60ºC
+                        if (tipo == DataType.Hum) baseThreshold = 50.0f;  // Aceita de 0% a 100%
+                        if (tipo == DataType.Lum) baseThreshold = 500.0f; // Até 600 lux normais
+                        if (tipo == DataType.Ruido) baseThreshold = 80.0f;// Até 120dB
+                        if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 50.0f; // Até 60 ug
 
                         float desvioPadrao = (float)Math.Sqrt(emaVarDict[tipo]);
                         float threshold = Math.Max(3 * desvioPadrao, baseThreshold); 
@@ -173,11 +173,11 @@ namespace OneHealth.Sensor
                         leiturasCountDict[tipo]++;
 
                         float baseThreshold = 5.0f;
-                        if (tipo == DataType.Temp) baseThreshold = 15.0f;
-                        if (tipo == DataType.Hum) baseThreshold = 25.0f;
-                        if (tipo == DataType.Lum) baseThreshold = 200.0f;
-                        if (tipo == DataType.Ruido) baseThreshold = 25.0f;
-                        if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 20.0f;
+                        if (tipo == DataType.Temp) baseThreshold = 40.0f;
+                        if (tipo == DataType.Hum) baseThreshold = 50.0f;
+                        if (tipo == DataType.Lum) baseThreshold = 500.0f;
+                        if (tipo == DataType.Ruido) baseThreshold = 80.0f;
+                        if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 50.0f;
 
                         float desvioPadrao = (float)Math.Sqrt(emaVarDict[tipo]);
                         float threshold = Math.Max(3 * desvioPadrao, baseThreshold); 
