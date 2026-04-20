@@ -77,6 +77,8 @@ namespace OneHealth.Sensor
                     var p = linha.Split(',');
                     string valorFormatado = p[1].Replace(',', '.');
 
+                    if (Enum.TryParse(p[0], out DataType tipo) && float.TryParse(valorFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue))
+                    {
                         if (!emaDict.ContainsKey(tipo)) {
                             switch (tipo) {
                                 case DataType.Temp: emaDict[tipo] = 20.0f; break;
@@ -151,6 +153,9 @@ namespace OneHealth.Sensor
                 
                 var parts = input.Split(' ');
                 if (parts.Length == 2 && Enum.TryParse(parts[0], true, out DataType tipo)) {
+                    string valFormatado = parts[1].Replace(',', '.');
+                    if (float.TryParse(valFormatado, NumberStyles.Any, CultureInfo.InvariantCulture, out float rawValue)) {
+                        
                         if (!emaDict.ContainsKey(tipo)) {
                             switch (tipo) {
                                 case DataType.Temp: emaDict[tipo] = 20.0f; break;
