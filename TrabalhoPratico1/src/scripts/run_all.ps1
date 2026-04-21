@@ -1,4 +1,25 @@
-Write-Host "=== [ ONE HEALTH - ECOSSISTEMA AUTOMATICO ] ==="
+Write-Host "=== [ ONE HEALTH - ECOSSISTEMA AUTOMATICO ] ===" -ForegroundColor Cyan
+
+Write-Host "A verificar dependencias essenciais no sistema..." -ForegroundColor Yellow
+if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
+    Write-Host "[ERRO FATAL] O SDK do .NET (v9.0) nao esta instalado nas Variaveis de Ambiente." -ForegroundColor Red
+    Write-Host "         O Avalonia UI e os nos distribuídos dependem do compilador C#." -ForegroundColor Red
+    exit 1
+}
+
+$pgRunning = $false
+# Verificar se porta do PostgreSQL (5432) esta em uso (ou seja, se a DB ta ligada)
+try {
+    $tcp = Get-NetTCPConnection -LocalPort 5432 -ErrorAction SilentlyContinue
+    if ($tcp) { $pgRunning = $true }
+} catch {}
+
+if (-not $pgRunning) {
+    Write-Host "[ERRO] Base de Dados PostgreSQL nao aparenta estar a correr na porta 5432." -ForegroundColor Red
+    Write-Host "       A analise requer ligacao a uma instancia PostgreSQL com user/pass postgres." -ForegroundColor Yellow
+    exit 1
+}
+
 $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DIR = Resolve-Path "$PSScriptRoot\.."
 cd $DIR
@@ -18,3 +39,6 @@ Start-Process "dotnet" -ArgumentList "run", "--no-build", "--project", "OneHealt
 Start-Process "dotnet" -ArgumentList "run", "--no-build", "--project", "OneHealth.Sensor/OneHealth.Sensor.csproj", "--", "104", "auto", "5002"
 
 dotnet run --no-build --project OneHealth.Dashboard/OneHealth.Dashboard.csproj
+
+# Para abrir o sensor 999 (sh):
+# dotnet run --project OneHealth.Sensor/OneHealth.Sensor.csproj -- 999 manual 5001

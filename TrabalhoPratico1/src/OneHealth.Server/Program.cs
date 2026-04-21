@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System;
 using System.IO;
 using System.Net;
@@ -19,7 +19,7 @@ namespace OneHealth.Server
             Console.WriteLine("=== [SERVIDOR CENTRAL ONE HEALTH (POSTGRESQL)] ===");
             InitDatabase();
             
-            // Inicia a tarefa paralela para receber o vídeo via UDP do Gateway
+
             _ = Task.Run(StartLiveStreamReceiverAsync);
 
             TcpListener listener = new TcpListener(IPAddress.Any, SERVER_PORT);
@@ -131,7 +131,7 @@ namespace OneHealth.Server
             int SERVER_UDP_PORT = 7000;
             string LIVE_DIR = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "server_live"));
             
-            // Limpa a pasta no arranque para a defesa começar do zero
+
             if (Directory.Exists(LIVE_DIR)) {
                 foreach (string file in Directory.GetFiles(LIVE_DIR)) File.Delete(file);
             } else {

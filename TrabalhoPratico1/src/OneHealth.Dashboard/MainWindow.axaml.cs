@@ -64,7 +64,7 @@ public partial class MainWindow : Window
         TelemetriaGlobal.Clear(); 
         Alertas.Clear();
         
-        // AUMENTADO PARA 100 REGISTOS!
+
         using var cmdAll = new NpgsqlCommand("SELECT timestamp, sensor_id, data_type, value, msg_type FROM telemetry ORDER BY timestamp DESC LIMIT 100", conn);
         using var readerAll = cmdAll.ExecuteReader();
         while(readerAll.Read()) {

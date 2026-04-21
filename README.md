@@ -5,7 +5,8 @@ Repositório central para a submissão dos trabalhos práticos da Unidade Curric
 
 ## Organização do Projeto
 * **`TrabalhoPratico1/`**: Infraestrutura de Monitorização Urbana "One Health".
-    * Simulador de Sensores IoT, Gateway de Borda e Servidor Central.
+    * Contém o Simulador de Sensores IoT, Gateway de Borda (Edge), Servidor Central e um Dashboard visual interativo (Avalonia).
+    * _Dica para Avaliação:_ A execução e teste do ecossistema estão agilizados através de scripts (`run_all`, `teste_manual`, `kill_all`) disponibilizados na subpasta `TrabalhoPratico1/src/scripts/` para macOS e Windows.
 
 ## Stack Tecnológica Geral
 * **Linguagem**: C# (.NET 9.0)

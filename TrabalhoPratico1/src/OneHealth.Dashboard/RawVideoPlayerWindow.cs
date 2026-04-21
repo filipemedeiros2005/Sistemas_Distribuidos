@@ -15,7 +15,7 @@ namespace OneHealth.Dashboard
         private Image _imageView;
         private DispatcherTimer? _timer;
         private FileStream? _fs;
-        private byte[] _buffer = new byte[272]; // 16 bytes de header + 256 bytes de cor (frame)
+        private byte[] _buffer = new byte[272];
         private int _width = 16;
         private int _height = 16;
 
@@ -40,7 +40,7 @@ namespace OneHealth.Dashboard
             { 
                 Width = 400, 
                 Height = 400, 
-                Stretch = Stretch.UniformToFill // Para ampliar os 16x16 até cobrir
+                Stretch = Stretch.UniformToFill 
             };
 
             stack.Children.Add(text);
@@ -51,7 +51,7 @@ namespace OneHealth.Dashboard
             {
                 try {
                     _fs = new FileStream(rawFilePath, FileMode.Open, FileAccess.Read);
-                    _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) }; // ~20 FPS para simular playback acelerado
+                    _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) }; 
                     _timer.Tick += (s, e) => NextFrame();
                     _timer.Start();
                 } catch {
@@ -71,7 +71,7 @@ namespace OneHealth.Dashboard
                 _timer?.Stop();
                 _fs?.Dispose();
                 
-                // Reinicia o player (Looping para a defesa ficar a rolar em background)
+
                 if (_fs != null) {
                     try {
                         _fs.Position = 0;
@@ -88,10 +88,10 @@ namespace OneHealth.Dashboard
                 for (int i = 0; i < 256; i++)
                 {
                     byte col = _buffer[16 + i];
-                    bgraData[i * 4] = col;       // Blue
-                    bgraData[i * 4 + 1] = col;   // Green
-                    bgraData[i * 4 + 2] = col;   // Red
-                    bgraData[i * 4 + 3] = 255;   // Alpha
+                    bgraData[i * 4] = col;       
+                    bgraData[i * 4 + 1] = col;   
+                    bgraData[i * 4 + 2] = col;   
+                    bgraData[i * 4 + 3] = 255;   
                 }
                 Marshal.Copy(bgraData, 0, locked.Address, bgraData.Length);
             }

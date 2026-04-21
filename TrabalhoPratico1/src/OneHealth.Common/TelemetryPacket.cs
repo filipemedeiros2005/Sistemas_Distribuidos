@@ -7,13 +7,13 @@ namespace OneHealth.Common
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct TelemetryPacket
     {
-        public MsgType MsgType;     // 1 Byte
-        public DataType DataType;   // 1 Byte
-        public ushort Reserved;     // 2 Bytes
-        public uint SensorID;       // 4 Bytes
-        public uint TimeStamp;      // 4 Bytes
-        public float Value;         // 4 Bytes
-        public uint CheckSum;       // 4 Bytes
+        public MsgType MsgType;
+        public DataType DataType;
+        public ushort Reserved;
+        public uint SensorID;
+        public uint TimeStamp;
+        public float Value;
+        public uint CheckSum;
 
         public byte[] ToBytes()
         {
@@ -63,7 +63,7 @@ namespace OneHealth.Common
             return ComputeCRC32(dataRegion) == this.CheckSum;
         }
 
-        // Lógica CRC32 Simples embutida para não precisares de mais ficheiros
+
         private static uint ComputeCRC32(byte[] data)
         {
             uint crc = 0xFFFFFFFF;

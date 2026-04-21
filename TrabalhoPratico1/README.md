@@ -30,14 +30,21 @@ O projeto foi verificado e suporta as seguintes plataformas:
 - **Modo Telemetria**: Os sensores podem operar em regime de baixo consumo (bateria).
 - **Modo Multimédia**: A transmissão de vídeo e o processamento de borda exigem que os dispositivos estejam ligados à corrente elétrica devido ao custo computacional do buffering de RAM e codificação UDP.
 
-## Como Executar
+## Como Executar (Ambiente de Defesa)
 
-1. Certifique-se de que a instância do PostgreSQL está ativa.
-2. Compile a solução `OneHealth.sln`.
-3. Execute as aplicações na seguinte ordem:
-   - Servidor (Aguardando conexões de Gateways).
-   - Gateway (Carregando a whitelist de sensores).
-   - Sensor (Iniciando a simulação de medições).
+Para facilitar a simulação em ambiente distribuído e a avaliação, o projeto contém ferramentas de automação na diretoria `src/scripts/`. Encontram-se disponíveis versões para **macOS/Linux** (`.sh`) e **Windows** (`.ps1`).
+
+1. **Arranque e Simulação (`run_all`)**
+   Abra a pasta `src/scripts` num terminal e execute o equivalente `run_all`. O script fará uma validação prévia de dependências (*.NET 9.0 SDK* e *PostgreSQL* operacionais). Posteriormente compilará as aplicações (Server, Dashboard, Gateway, Sensores automáticos) despoletando as respetivas janelas/terminais concorrentes.
+
+2. **Injeção de Anomalias (`teste_manual`)**
+   A partir de outro terminal, execute o `teste_manual`. Este inicializará o **Sensor 999** num modo assistido, permitindo que escreva comandos manuais interativos (ex: `Lum 800`) para ver, ao vivo, a resposta da infraestrutura de Edge Computig a um alerta (*3-Sigma*) gerado espontaneamente.
+
+3. **Encerramento Automático (`kill_all`)**
+   Ao finalizar os testes e visualizações, ou em caso de paragem forçada, execute sempre o script `kill_all`. Este destrói todos os processos nativos escondidos, liberta e limpa forçosamente portas encravadas usadas (TCP 5000-5005, UDP 6000-6001, Server 7000) e minimiza a confusão nos terminais abertos.
+
+**Nota para Execução Tradicional:**
+Caso prefira simulação cirúrgica isolada, certifique-se de que a instância do PostgreSQL está ativa e corra as aplicações sequencialmente pelo CLI (`dotnet run`) respeitando a ordem: Servidor → Dashboard → Gateway → Carga de Sensores.
 
 ---
 *Desenvolvido no âmbito da Licenciatura em Engenharia Informática.*

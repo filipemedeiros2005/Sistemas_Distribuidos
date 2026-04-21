@@ -11,7 +11,7 @@ namespace OneHealth.Common
         STATUS = 7
     }
 
-    //Associação dos tipos de dados a um número inteiro, para facilitar a sua identificação e processamento
+
     public enum DataType : byte
     {
         Unknown = 0,

@@ -22,7 +22,7 @@ namespace OneHealth.Sensor
         private static NetworkStream? _stream;
         private static readonly List<TelemetryPacket> _bufferRotina = new();
         private static readonly System.Collections.Concurrent.ConcurrentQueue<byte[]> _videoBuffer = new();
-        private static readonly int MAX_FRAMES_IN_BUFFER = 300; // 30s @ 10fps
+        private static readonly int MAX_FRAMES_IN_BUFFER = 300;
 
         static async Task Main(string[] args)
         {
@@ -89,16 +89,16 @@ namespace OneHealth.Sensor
                                 default: emaDict[tipo] = rawValue; break;
                             }
                             emaVarDict[tipo] = 1f;
-                            leiturasCountDict[tipo] = 2; // Forçar que a primeira leitura possa despontar alertas instantaneamente
+                            leiturasCountDict[tipo] = 2;
                         }
                         leiturasCountDict[tipo]++;
 
                         float baseThreshold = 5.0f;
-                        if (tipo == DataType.Temp) baseThreshold = 40.0f; // Aceita de -20ºC a 60ºC
-                        if (tipo == DataType.Hum) baseThreshold = 50.0f;  // Aceita de 0% a 100%
-                        if (tipo == DataType.Lum) baseThreshold = 500.0f; // Até 600 lux normais
-                        if (tipo == DataType.Ruido) baseThreshold = 80.0f;// Até 120dB
-                        if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 50.0f; // Até 60 ug
+                        if (tipo == DataType.Temp) baseThreshold = 40.0f; 
+                        if (tipo == DataType.Hum) baseThreshold = 50.0f;  
+                        if (tipo == DataType.Lum) baseThreshold = 500.0f; 
+                        if (tipo == DataType.Ruido) baseThreshold = 80.0f;
+                        if (tipo == DataType.PM25 || tipo == DataType.PM10) baseThreshold = 50.0f; 
 
                         float desvioPadrao = (float)Math.Sqrt(emaVarDict[tipo]);
                         float threshold = Math.Max(3 * desvioPadrao, baseThreshold); 
@@ -168,7 +168,7 @@ namespace OneHealth.Sensor
                                 default: emaDict[tipo] = rawValue; break;
                             }
                             emaVarDict[tipo] = 1f;
-                            leiturasCountDict[tipo] = 2; // Para autorizar despoletar alerta log na 1ª leitura manual
+                            leiturasCountDict[tipo] = 2;
                         }
                         leiturasCountDict[tipo]++;
 
@@ -233,16 +233,16 @@ namespace OneHealth.Sensor
                 Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
                 
                 var rnd = new Random();
-                // Simular um padrão de vídeo com ruído denso e normal (TV estática escura)
+
                 for(int i=16; i<packet.Length; i++) packet[i] = (byte)rnd.Next(30, 100);
 
                 _videoBuffer.Enqueue(packet);
                 if (_videoBuffer.Count > MAX_FRAMES_IN_BUFFER) {
-                    _videoBuffer.TryDequeue(out _); // FIFO rotativo (30 segundos na RAM)
+                    _videoBuffer.TryDequeue(out _);
                 }
 
                 sequenceNum++;
-                System.Threading.Thread.Sleep(100); // 10 FPS
+                System.Threading.Thread.Sleep(100);
             }
         }
 
@@ -250,14 +250,14 @@ namespace OneHealth.Sensor
             Console.ForegroundColor = ConsoleColor.Yellow; Console.WriteLine($"[UDP] A transmitir Frames de Video da RAM (Porta {_gatewayUdpPort})..."); Console.ResetColor();
             using var udpClient = new UdpClient(); 
             
-            // 1. DUMP DA RAM (30s)
+
             var dump = _videoBuffer.ToArray();
             foreach(var frame in dump) {
                 await udpClient.SendAsync(frame, frame.Length, GATEWAY_IP, _gatewayUdpPort);
             }
             Console.WriteLine($"[UDP] Dump da RAM Concluído ({dump.Length} frames pre-anomalia)");
 
-            // 2. Transmissão pós-anomalia contínua ao vivo (120s)
+
             var end = DateTime.Now.AddSeconds(120);
             uint lastSeq = dump.Length > 0 ? VideoPacketHeader.FromBytes(dump[^1]).SequenceNum : 0;
             
@@ -268,7 +268,7 @@ namespace OneHealth.Sensor
                 Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
                 
                 var rnd = new Random();
-                // Ruído agressivo brilhante pós anomalia (CCTV comprometida)
+
                 for(int i=16; i<packet.Length; i++) packet[i] = (byte)rnd.Next(150, 256);
 
                 await udpClient.SendAsync(packet, packet.Length, GATEWAY_IP, _gatewayUdpPort);
