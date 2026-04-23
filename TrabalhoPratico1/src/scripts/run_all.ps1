@@ -40,5 +40,17 @@ Start-Process "dotnet" -ArgumentList "run", "--no-build", "--project", "OneHealt
 
 dotnet run --no-build --project OneHealth.Dashboard/OneHealth.Dashboard.csproj
 
-# Para abrir o sensor 999 (sh):
-# dotnet run --project OneHealth.Sensor/OneHealth.Sensor.csproj -- 999 manual 5001
+# --- COMANDOS UTEIS ---
+# Para abrir o sensor 999 NOUA NOVA JANELA (a partir da pasta 'src'):
+# Start-Process "dotnet" -ArgumentList "run", "--project", "OneHealth.Sensor/OneHealth.Sensor.csproj", "--", "999", "manual", "5001"
+#
+# Para executar no terminal atual (a partir de 'src/scripts'):
+# ./teste_manual.ps1
+#
+# Para aceder a BD PostgreSQL no terminal:
+# psql -h localhost -U postgres -d onehealth
+# (A password: postgres)
+#
+# Exemplo de comando SQL (ultimas 30 entradas):
+# SELECT * FROM telemetry ORDER BY timestamp DESC LIMIT 30;
+# ----------------------

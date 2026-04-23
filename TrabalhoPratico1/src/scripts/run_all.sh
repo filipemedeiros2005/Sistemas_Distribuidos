@@ -37,5 +37,17 @@ osascript -e "tell application \"Terminal\" to do script \"cd '$DIR' && dotnet r
 
 dotnet run --no-build --project OneHealth.Dashboard/OneHealth.Dashboard.csproj
 
-# Para abrir o sensor 999 (sh):
-# dotnet run --project OneHealth.Sensor/OneHealth.Sensor.csproj -- 999 manual 5001
+# --- COMANDOS UTEIS ---
+# Para abrir o sensor 999 NOVA JANELA (a partir da pasta 'src'):
+# osascript -e "tell application \"Terminal\" to do script \"cd '$(pwd)' && dotnet run --project OneHealth.Sensor/OneHealth.Sensor.csproj -- 999 manual 5001\""
+#
+# Para executar no terminal atual (a partir de 'src/scripts'):
+# ./teste_manual.sh
+#
+# Para aceder a BD PostgreSQL no terminal:
+# psql -h localhost -U postgres -d onehealth
+# (A password: postgres)
+#
+# Exemplo de comando SQL (ultimas 30 entradas):
+# SELECT * FROM telemetry ORDER BY timestamp DESC LIMIT 30;
+# ----------------------
