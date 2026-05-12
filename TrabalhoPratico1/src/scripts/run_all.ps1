@@ -24,6 +24,22 @@ $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DIR = Resolve-Path "$PSScriptRoot\.."
 cd $DIR
 
+# Sobe o broker RabbitMQ (TP2 - Fase 1). Aguarda o healthcheck antes de avancar.
+if (Get-Command "docker" -ErrorAction SilentlyContinue) {
+    Write-Host "[INFRA] A arrancar RabbitMQ via docker compose..." -ForegroundColor Cyan
+    docker compose -f "$DIR\infra\docker-compose.yml" up -d
+    for ($i = 0; $i -lt 24; $i++) {
+        $status = (docker inspect --format='{{.State.Health.Status}}' onehealth-rabbitmq 2>$null)
+        if ($status -eq "healthy") {
+            Write-Host "[INFRA] RabbitMQ pronto (admin em http://localhost:15672 -- guest/guest)." -ForegroundColor Green
+            break
+        }
+        Start-Sleep -Seconds 2
+    }
+} else {
+    Write-Host "[AVISO] Docker nao detectado. RabbitMQ nao podera arrancar (Fase 1 TP2)." -ForegroundColor Yellow
+}
+
 dotnet build OneHealth.sln
 
 Start-Process "dotnet" -ArgumentList "run", "--no-build", "--project", "OneHealth.Server/OneHealth.Server.csproj"

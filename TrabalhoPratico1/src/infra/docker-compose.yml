@@ -1,0 +1,38 @@
+name: onehealth-infra
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: onehealth-rabbitmq
+    hostname: onehealth-rabbitmq
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management UI (guest/guest)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # Optional: descomentar se quiseres uma instância de Postgres dedicada
+  # em vez do PostgreSQL local. Por agora mantemos o PG local.
+  #
+  # postgres:
+  #   image: postgres:16
+  #   container_name: onehealth-postgres
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: onehealth
+  #   volumes:
+  #     - onehealth-pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+# volumes:
+#   onehealth-pgdata:

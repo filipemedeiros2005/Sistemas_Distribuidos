@@ -12,4 +12,11 @@ lsof -ti :5000,5001,5002,5005,6000,6001,7000 | xargs kill -9 2>/dev/null
 # Fecha as abas do Terminal que ficaram abertas com as execucoes
 osascript -e 'tell application "Terminal" to close (every window whose name contains "dotnet")' 2>/dev/null
 
+# Para o broker RabbitMQ (TP2 - Fase 1).
+if command -v docker &> /dev/null; then
+    DIR="$(cd "$(dirname "$0")/.." && pwd)"
+    echo "[INFRA] A parar containers do docker compose..."
+    docker compose -f "$DIR/infra/docker-compose.yml" down 2>/dev/null
+fi
+
 echo "Limpeza concluida com sucesso!"

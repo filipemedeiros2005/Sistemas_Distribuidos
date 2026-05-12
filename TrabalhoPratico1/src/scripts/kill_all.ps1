@@ -16,4 +16,12 @@ foreach ($port in $ports) {
     } catch {}
 }
 
+# Para o broker RabbitMQ (TP2 - Fase 1).
+if (Get-Command "docker" -ErrorAction SilentlyContinue) {
+    $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $DIR = Resolve-Path "$PSScriptRoot\.."
+    Write-Host "[INFRA] A parar containers do docker compose..." -ForegroundColor Cyan
+    docker compose -f "$DIR\infra\docker-compose.yml" down 2>$null
+}
+
 Write-Host "Limpeza concluida com sucesso!" -ForegroundColor Green

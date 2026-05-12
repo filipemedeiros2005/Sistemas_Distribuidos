@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package onehealth.analysis;
+
+option csharp_namespace = "OneHealth.Grpc.Analysis";
+
+// AnalysisService é invocado pelo Servidor Central para realizar análises
+// estatísticas, deteção de padrões e previsões sobre os dados persistidos
+// em PostgreSQL. Implementado em Python (pandas / numpy / scikit-learn).
+service AnalysisService {
+  // Executa uma análise paramétrica (intervalo temporal, tipos, sensores,
+  // zona) e devolve um sumário, série e métricas.
+  rpc RunAnalysis (AnalysisRequest) returns (AnalysisResult);
+
+  // Devolve os tipos de análise disponíveis (para popular dropdowns na UI).
+  rpc ListAvailableAnalyses (Empty) returns (AvailableAnalyses);
+}
+
+message AnalysisRequest {
+  // "AVG" | "STDDEV" | "ANOMALY_RATE" | "FORECAST"
+  string kind = 1;
+
+  uint64 from_unix_ts   = 2;
+  uint64 to_unix_ts     = 3;
+
+  repeated string data_types = 4;   // vazio = todos
+  repeated uint32 sensor_ids = 5;   // vazio = todos
+  string zona               = 6;    // opcional
+
+  // Parâmetros específicos do tipo de análise (e.g. horizonte do forecast).
+  map<string, string> options = 7;
+}
+
+message SeriesPoint {
+  uint64 ts    = 1;
+  double value = 2;
+  string label = 3;   // p. ex. "S101/TEMP"
+}
+
+message AnalysisResult {
+  string kind                 = 1;
+  string summary_text         = 2;
+  repeated SeriesPoint series = 3;
+  map<string, double> metrics = 4;
+  uint64 produced_unix_ts     = 5;
+}
+
+message Empty {}
+message AvailableAnalyses { repeated string kinds = 1; }

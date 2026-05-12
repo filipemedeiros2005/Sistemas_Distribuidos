@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package onehealth.preproc;
+
+option go_package = "onehealth/preproc;preproc";
+option csharp_namespace = "OneHealth.Grpc.Preproc";
+
+// PreProcessor é invocado pelo Gateway antes do encaminhamento para o
+// Servidor Central. Garante normalização de unidades, validação de limites
+// e descarte de leituras corrompidas / fora de gama.
+service PreProcessor {
+  // Normaliza uma única leitura. Para baixa latência / alertas urgentes.
+  rpc Normalize (RawMeasurement) returns (NormalizedMeasurement);
+
+  // Normaliza um lote (caso de uso: batch de 10 do Sensor).
+  rpc NormalizeBatch (BatchRequest) returns (BatchResponse);
+}
+
+// Mensagem original tal como o Gateway a recebeu via Pub/Sub (Fase 1 do TP2).
+message RawMeasurement {
+  uint32 sensor_id     = 1;
+  string data_type     = 2;   // "TEMP","HUM","PM25","PM10","RUIDO","LUM"
+  double value         = 3;
+  uint64 unix_ts       = 4;
+  string zona          = 5;
+  string source_format = 6;   // "BIN","JSON","XML","CSV" — informativo
+  string unit_hint     = 7;   // "C","F","K","ugm3","dB","lx","pct" — opcional
+}
+
+message NormalizedMeasurement {
+  uint32 sensor_id  = 1;
+  string data_type  = 2;
+  double value      = 3;   // valor já convertido para unidade canónica
+  uint64 unix_ts    = 4;
+  string zona       = 5;
+  bool   dropped    = 6;   // true se a limpeza rejeitou a leitura
+  string drop_reason = 7;  // motivo legível (e.g. "out_of_bounds:TEMP>70")
+}
+
+message BatchRequest  { repeated RawMeasurement       items = 1; }
+message BatchResponse { repeated NormalizedMeasurement items = 1; }

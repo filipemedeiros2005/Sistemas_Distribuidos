@@ -8,6 +8,10 @@ if ! command -v dotnet &> /dev/null; then
     exit 1
 fi
 
+if ! command -v docker &> /dev/null; then
+    echo "[AVISO] Docker nao detectado. O broker RabbitMQ (Fase 1 TP2) nao podera arrancar."
+fi
+
 if ! nc -z localhost 5432 &>/dev/null; then
     echo "[AVISO] Nao foi possivel confirmar PostgreSQL na porta 5432."
     echo "        Se nao utilizar a configuracao padrao do PG, podem ocorrer erros de BD."
@@ -15,6 +19,22 @@ fi
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
+
+# Sobe o broker RabbitMQ (TP2). O healthcheck dentro do compose garante
+# que o port 5672 está aceitar AMQP antes de avancarmos.
+if command -v docker &> /dev/null; then
+    echo "[INFRA] A arrancar RabbitMQ via docker compose..."
+    docker compose -f infra/docker-compose.yml up -d
+    echo "[INFRA] A aguardar healthcheck do broker..."
+    for i in $(seq 1 24); do
+        status=$(docker inspect --format='{{.State.Health.Status}}' onehealth-rabbitmq 2>/dev/null || echo "missing")
+        if [ "$status" = "healthy" ]; then
+            echo "[INFRA] RabbitMQ pronto (admin em http://localhost:15672 -- guest/guest)."
+            break
+        fi
+        sleep 2
+    done
+fi
 
 
 dotnet build OneHealth.sln
