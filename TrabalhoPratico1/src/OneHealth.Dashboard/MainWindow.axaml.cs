@@ -41,9 +41,11 @@ public partial class MainWindow : Window
     {
         try {
             using var conn = new NpgsqlConnection(DB_CONNECTION); conn.Open();
-            CarregarSensores(conn); 
+            CarregarSensores(conn);
             CarregarDados(conn);
-        } catch { }
+        } catch (Exception ex) {
+            Console.WriteLine($"[DASHBOARD] {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private void CarregarSensores(NpgsqlConnection conn)
