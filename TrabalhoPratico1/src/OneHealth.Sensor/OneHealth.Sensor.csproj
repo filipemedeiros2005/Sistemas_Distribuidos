@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OneHealth.Common\OneHealth.Common.csproj" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.0.0" />
   </ItemGroup>
 
   <PropertyGroup>
