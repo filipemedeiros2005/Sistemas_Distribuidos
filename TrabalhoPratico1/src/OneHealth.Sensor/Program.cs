@@ -23,6 +23,7 @@ namespace OneHealth.Sensor
         private static readonly List<TelemetryPacket> _bufferRotina = new();
         private static readonly System.Collections.Concurrent.ConcurrentQueue<byte[]> _videoBuffer = new();
         private static readonly int MAX_FRAMES_IN_BUFFER = 300;
+        private static readonly Random _rng = new();
 
         static async Task Main(string[] args)
         {
@@ -37,16 +38,45 @@ namespace OneHealth.Sensor
             Console.CancelKeyPress += (sender, e) => { e.Cancel = true; _isRunning = false; };
 
             try {
-                _tcpClient = new TcpClient(); 
-                await _tcpClient.ConnectAsync(GATEWAY_IP, _gatewayTcpPort); 
+                _tcpClient = new TcpClient();
+                await _tcpClient.ConnectAsync(GATEWAY_IP, _gatewayTcpPort);
                 _stream = _tcpClient.GetStream();
                 await SendPacketAsync(new TelemetryPacket { MsgType = MsgType.HELO, SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
 
+                if (!await AwaitHandshakeAsync()) {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("[HANDSHAKE] Sensor não autorizado pelo Gateway. A encerrar.");
+                    Console.ResetColor();
+                    _isRunning = false;
+                    return;
+                }
+
                 if (modoOperacao == "manual") await RunManualModeAsync();
-                else await RunAutoSimulationAsync(); 
+                else await RunAutoSimulationAsync();
             }
             catch (Exception ex) { Console.WriteLine($"[ERRO DE LIGACAO] {ex.Message}"); }
             finally { if (_tcpClient != null && _tcpClient.Connected) await SendPacketAsync(new TelemetryPacket { MsgType = MsgType.BYE, SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() }); }
+        }
+
+        private static async Task<bool> AwaitHandshakeAsync()
+        {
+            if (_stream == null) return false;
+            byte[] respBuf = new byte[20];
+            int total = 0;
+            while (total < 20) {
+                int r = await _stream.ReadAsync(respBuf, total, 20 - total);
+                if (r == 0) return false;
+                total += r;
+            }
+            var resp = TelemetryPacket.FromBytes(respBuf);
+            if (!resp.IsValid()) return false;
+            if (resp.MsgType == MsgType.ACK) {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[HANDSHAKE] ACK recebido — Sensor {_sensorId} autorizado.");
+                Console.ResetColor();
+                return true;
+            }
+            return false;
         }
 
         private static async Task RunAutoSimulationAsync()
@@ -63,13 +93,13 @@ namespace OneHealth.Sensor
             Console.WriteLine($"[INFO] Algoritmo 3-Sigma Iniciado.");
             var linhas = await File.ReadAllLinesAsync(csvPath);
 
-            while (_isRunning) 
-            {
-                var emaDict = new Dictionary<DataType, float>();
-                var emaVarDict = new Dictionary<DataType, float>();
-                var leiturasCountDict = new Dictionary<DataType, int>();
-                float alpha = 0.2f;
+            var emaDict = new Dictionary<DataType, float>();
+            var emaVarDict = new Dictionary<DataType, float>();
+            var leiturasCountDict = new Dictionary<DataType, int>();
+            float alpha = 0.2f;
 
+            while (_isRunning)
+            {
                 foreach (var linha in linhas)
                 {
                     if (!_isRunning) break;
@@ -120,9 +150,10 @@ namespace OneHealth.Sensor
                             emaVarDict[tipo] = 1f;
                             leiturasCountDict[tipo] = 0;
                         } else {
-                            emaDict[tipo] = emaDict[tipo] + alpha * (rawValue - emaDict[tipo]);
-                            emaVarDict[tipo] = (1.0f - alpha) * (emaVarDict[tipo] + alpha * ((rawValue - emaDict[tipo]) * (rawValue - emaDict[tipo])));
-                            
+                            float delta = rawValue - emaDict[tipo];
+                            emaDict[tipo] = emaDict[tipo] + alpha * delta;
+                            emaVarDict[tipo] = alpha * delta * delta + (1.0f - alpha) * emaVarDict[tipo];
+
                             _bufferRotina.Add(packet);
                             Console.WriteLine($"[DADO NORMAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/10)");
                             if (_bufferRotina.Count >= 10) {
@@ -199,9 +230,10 @@ namespace OneHealth.Sensor
                             emaVarDict[tipo] = 1f;
                             leiturasCountDict[tipo] = 0;
                         } else {
-                            emaDict[tipo] = emaDict[tipo] + alpha * (rawValue - emaDict[tipo]);
-                            emaVarDict[tipo] = (1.0f - alpha) * (emaVarDict[tipo] + alpha * ((rawValue - emaDict[tipo]) * (rawValue - emaDict[tipo])));
-                            
+                            float delta = rawValue - emaDict[tipo];
+                            emaDict[tipo] = emaDict[tipo] + alpha * delta;
+                            emaVarDict[tipo] = alpha * delta * delta + (1.0f - alpha) * emaVarDict[tipo];
+
                             _bufferRotina.Add(packet);
                             Console.WriteLine($"[DADO NORMAL MANUAL] {tipo}: {rawValue:F2} -> Buffer ({_bufferRotina.Count}/10)");
                             if (_bufferRotina.Count >= 10) {
@@ -231,10 +263,8 @@ namespace OneHealth.Sensor
                 var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = sequenceNum, DataSize = 256 };
                 byte[] packet = new byte[16 + 256];
                 Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
-                
-                var rnd = new Random();
 
-                for(int i=16; i<packet.Length; i++) packet[i] = (byte)rnd.Next(30, 100);
+                for(int i=16; i<packet.Length; i++) packet[i] = (byte)_rng.Next(30, 100);
 
                 _videoBuffer.Enqueue(packet);
                 if (_videoBuffer.Count > MAX_FRAMES_IN_BUFFER) {
@@ -266,10 +296,8 @@ namespace OneHealth.Sensor
                 var h = new VideoPacketHeader { SensorID = _sensorId, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), SequenceNum = lastSeq, DataSize = 256 };
                 byte[] packet = new byte[16 + 256];
                 Buffer.BlockCopy(h.ToBytes(), 0, packet, 0, 16);
-                
-                var rnd = new Random();
 
-                for(int i=16; i<packet.Length; i++) packet[i] = (byte)rnd.Next(150, 256);
+                for(int i=16; i<packet.Length; i++) packet[i] = (byte)_rng.Next(150, 256);
 
                 await udpClient.SendAsync(packet, packet.Length, GATEWAY_IP, _gatewayUdpPort);
                 if (lastSeq % 20 == 0) Console.WriteLine($"[UDP] Frame pós-evento {lastSeq} enviado >>");

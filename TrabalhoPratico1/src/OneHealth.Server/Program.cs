@@ -60,16 +60,27 @@ namespace OneHealth.Server
 
         private static async Task HandleGatewayAsync(TcpClient client)
         {
-            using (client) using (NetworkStream stream = client.GetStream())
+            string remote = client.Client.RemoteEndPoint?.ToString() ?? "?";
+            try
             {
-                byte[] buffer = new byte[20]; 
-                while (true) {
-                    int bytesRead = await ReadExactlyAsync(stream, buffer, 20);
-                    if (bytesRead == 0) break;
+                using (client) using (NetworkStream stream = client.GetStream())
+                {
+                    byte[] buffer = new byte[20];
+                    while (true) {
+                        int bytesRead = await ReadExactlyAsync(stream, buffer, 20);
+                        if (bytesRead == 0) break;
 
-                    TelemetryPacket packet = TelemetryPacket.FromBytes(buffer);
-                    if (packet.IsValid()) ProcessPacket(packet);
+                        TelemetryPacket packet = TelemetryPacket.FromBytes(buffer);
+                        if (packet.IsValid()) ProcessPacket(packet);
+                        else Console.WriteLine($"[CHECKSUM] Pacote descartado (S{packet.SensorID} via {remote}).");
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[ERRO GATEWAY-HANDLER] {remote} | {ex.GetType().Name}: {ex.Message}");
+                Console.ResetColor();
             }
         }
 

@@ -66,30 +66,94 @@ namespace OneHealth.Gateway
             using (client) using (NetworkStream stream = client.GetStream())
             {
                 byte[] buffer = new byte[20];
-                while (true)
+
+                try
                 {
-                    if (await ReadExactlyAsync(stream, buffer, 20) == 0) break;
+                    if (await ReadExactlyAsync(stream, buffer, 20) == 0) return;
+                    TelemetryPacket helo = TelemetryPacket.FromBytes(buffer);
 
-                    TelemetryPacket packet = TelemetryPacket.FromBytes(buffer);
-                    if (!packet.IsValid()) continue;
+                    if (!helo.IsValid() || helo.MsgType != MsgType.HELO)
+                    {
+                        await SendHandshakeReplyAsync(stream, helo.SensorID, MsgType.NACK);
+                        Console.WriteLine($"[FIREWALL] NACK -> pacote inicial inválido (S{helo.SensorID}).");
+                        return;
+                    }
 
+                    bool authorized;
+                    SensorConfig? cfg = null;
+                    if (_sensors.IsEmpty)
+                    {
+                        authorized = true;
+                    }
+                    else
+                    {
+                        authorized = _sensors.TryGetValue(helo.SensorID, out cfg)
+                                     && cfg!.Estado != "manutencao";
+                    }
 
-                    if (!_sensors.IsEmpty) {
-                        if (!_sensors.TryGetValue(packet.SensorID, out SensorConfig? cfg) || cfg.Estado == "manutencao") break;
-                        
-                        if (cfg.Estado.Contains("desativ")) { 
-                            cfg.Estado = "ativo";
-                            lock (_filaLock) _filaPrioridade.Enqueue(new TelemetryPacket { MsgType = MsgType.STATUS, SensorID = packet.SensorID, Value = 1, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() }, 0);
-                        }
+                    if (!authorized)
+                    {
+                        await SendHandshakeReplyAsync(stream, helo.SensorID, MsgType.NACK);
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[FIREWALL] NACK -> Sensor {helo.SensorID} rejeitado (whitelist).");
+                        Console.ResetColor();
+                        return;
+                    }
+
+                    await SendHandshakeReplyAsync(stream, helo.SensorID, MsgType.ACK);
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"[FIREWALL] ACK -> Sensor {helo.SensorID} autorizado.");
+                    Console.ResetColor();
+
+                    if (cfg != null)
+                    {
+                        cfg.Estado = "ativo";
                         cfg.LastSync = DateTime.Now;
                     }
 
-                    if (packet.MsgType == MsgType.ALERT || packet.MsgType == MsgType.HELO || packet.MsgType == MsgType.BYE)
-                        lock (_filaLock) _filaPrioridade.Enqueue(packet, 0); 
-                    else
-                        lock (_filaLock) _filaPrioridade.Enqueue(packet, 1); 
+                    lock (_filaLock) _filaPrioridade.Enqueue(helo, 0);
+
+                    while (true)
+                    {
+                        if (await ReadExactlyAsync(stream, buffer, 20) == 0) break;
+
+                        TelemetryPacket packet = TelemetryPacket.FromBytes(buffer);
+                        if (!packet.IsValid()) continue;
+
+                        if (_sensors.TryGetValue(packet.SensorID, out SensorConfig? live))
+                        {
+                            if (live.Estado == "manutencao") break;
+                            live.LastSync = DateTime.Now;
+                            if (live.Estado.Contains("desativ"))
+                            {
+                                live.Estado = "ativo";
+                                lock (_filaLock) _filaPrioridade.Enqueue(new TelemetryPacket { MsgType = MsgType.STATUS, SensorID = packet.SensorID, Value = 1, TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds() }, 0);
+                            }
+                        }
+
+                        int prio = (packet.MsgType == MsgType.ALERT || packet.MsgType == MsgType.BYE) ? 0 : 1;
+                        lock (_filaLock) _filaPrioridade.Enqueue(packet, prio);
+
+                        if (packet.MsgType == MsgType.BYE) break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ERRO SENSOR-HANDLER] {ex.Message}");
                 }
             }
+        }
+
+        private static async Task SendHandshakeReplyAsync(NetworkStream stream, uint sensorId, MsgType reply)
+        {
+            var pkt = new TelemetryPacket
+            {
+                MsgType = reply,
+                SensorID = sensorId,
+                TimeStamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+            };
+            pkt.CalculateAndSetChecksum();
+            await stream.WriteAsync(pkt.ToBytes());
         }
 
         private static async Task CicloDeEnvioAoServidorAsync()
