@@ -13,8 +13,15 @@ if (Test-Path "$env:TEMP\oh_preproc.pid") {
 }
 Stop-Process -Name "preprocessor" -Force -ErrorAction SilentlyContinue
 
+# Analysis-py service (TP2 - Fase 3).
+if (Test-Path "$env:TEMP\oh_analysis.pid") {
+    $pid_analysis = Get-Content "$env:TEMP\oh_analysis.pid"
+    Stop-Process -Id $pid_analysis -Force -ErrorAction SilentlyContinue
+    Remove-Item "$env:TEMP\oh_analysis.pid" -ErrorAction SilentlyContinue
+}
+
 Write-Host "Libertando portas especificas relativas a gateways e sensores..."
-$ports = @(5000, 5001, 5002, 5005, 6000, 6001, 7000, 50051)
+$ports = @(5000, 5001, 5002, 5005, 6000, 6001, 7000, 50051, 50052)
 foreach ($port in $ports) {
     try {
         $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue

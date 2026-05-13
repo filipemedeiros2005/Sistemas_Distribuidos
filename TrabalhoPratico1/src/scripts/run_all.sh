@@ -55,6 +55,22 @@ else
     echo "[AVISO] Go não detectado — pre-processor desligado, Gateway irá fail-closed em DATA/ALERT."
 fi
 
+# Analysis-py service (TP2 — Fase 3). Arranca em background se o venv existir.
+if [ -x "$DIR/services/analysis-py/.venv/bin/python" ]; then
+    echo "[INFRA] A arrancar analysis-py (Python)..."
+    nohup "$DIR/services/analysis-py/.venv/bin/python" "$DIR/services/analysis-py/server.py" >/tmp/oh_analysis.log 2>&1 &
+    echo $! > /tmp/oh_analysis.pid
+    # Python tem cold-start mais lento que o Go (imports grpc/pandas/sklearn).
+    sleep 3
+    if kill -0 "$(cat /tmp/oh_analysis.pid)" 2>/dev/null; then
+        echo "[INFRA] Analysis-py PID=$(cat /tmp/oh_analysis.pid) em :50052."
+    else
+        echo "[AVISO] Analysis-py não arrancou. Ver /tmp/oh_analysis.log."
+    fi
+else
+    echo "[AVISO] venv ausente em services/analysis-py — corra 'make setup' nesse directório."
+fi
+
 
 osascript -e "tell application \"Terminal\" to do script \"cd '$DIR' && dotnet run --no-build --project OneHealth.Server/OneHealth.Server.csproj\""
 sleep 3 

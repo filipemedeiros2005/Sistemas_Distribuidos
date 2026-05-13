@@ -56,6 +56,18 @@ if (Get-Command "go" -ErrorAction SilentlyContinue) {
     Write-Host "[AVISO] Go nao detectado - pre-processor desligado." -ForegroundColor Yellow
 }
 
+# Analysis-py service (TP2 - Fase 3).
+$analysisPy = "$DIR\services\analysis-py\.venv\Scripts\python.exe"
+if (Test-Path $analysisPy) {
+    Write-Host "[INFRA] A arrancar analysis-py (Python)..." -ForegroundColor Cyan
+    $analysis = Start-Process -FilePath $analysisPy -ArgumentList "$DIR\services\analysis-py\server.py" -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\oh_analysis.log"
+    $analysis.Id | Out-File "$env:TEMP\oh_analysis.pid"
+    Start-Sleep -Seconds 3
+    Write-Host "[INFRA] Analysis-py PID=$($analysis.Id) em :50052." -ForegroundColor Green
+} else {
+    Write-Host "[AVISO] venv ausente em services\analysis-py - corra 'make setup' nesse directorio." -ForegroundColor Yellow
+}
+
 Start-Process "dotnet" -ArgumentList "run", "--no-build", "--project", "OneHealth.Server/OneHealth.Server.csproj"
 Start-Sleep -Seconds 3
 
