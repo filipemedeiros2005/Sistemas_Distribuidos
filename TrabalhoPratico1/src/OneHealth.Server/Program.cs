@@ -21,6 +21,7 @@ namespace OneHealth.Server
             
 
             _ = Task.Run(StartLiveStreamReceiverAsync);
+            _ = Task.Run(() => AnalysisCoordinator.StartAsync(DB_CONNECTION));
 
             TcpListener listener = new TcpListener(IPAddress.Any, SERVER_PORT);
             listener.Start();

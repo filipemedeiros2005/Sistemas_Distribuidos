@@ -21,7 +21,7 @@ if (Test-Path "$env:TEMP\oh_analysis.pid") {
 }
 
 Write-Host "Libertando portas especificas relativas a gateways e sensores..."
-$ports = @(5000, 5001, 5002, 5005, 6000, 6001, 7000, 50051, 50052)
+$ports = @(5000, 5001, 5002, 5005, 5006, 6000, 6001, 7000, 50051, 50052)
 foreach ($port in $ports) {
     try {
         $connections = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue

@@ -6,8 +6,8 @@ echo "Encerrando todos os processos 'dotnet' relativos a OneHealth..."
 pkill -f "dotnet run"
 pkill -f "OneHealth"
 
-echo "Limpando portas presas (5000-5005, 6000-6001, 7000, 50051, 50052)..."
-lsof -ti :5000,5001,5002,5005,6000,6001,7000,50051,50052 | xargs kill -9 2>/dev/null
+echo "Limpando portas presas (5000-5006, 6000-6001, 7000, 50051, 50052)..."
+lsof -ti :5000,5001,5002,5005,5006,6000,6001,7000,50051,50052 | xargs kill -9 2>/dev/null
 
 # Pre-processor Go (TP2).
 if [ -f /tmp/oh_preproc.pid ]; then
