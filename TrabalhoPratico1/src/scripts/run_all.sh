@@ -39,6 +39,22 @@ fi
 
 dotnet build OneHealth.sln
 
+# Pre-processor Go service (TP2 — Fase 2). Compila se necessário e arranca em background.
+if command -v go &> /dev/null; then
+    echo "[INFRA] A compilar e arrancar pre-processor (Go)..."
+    (cd services/preprocessor-go && make build >/dev/null 2>&1)
+    nohup "$DIR/services/preprocessor-go/bin/preprocessor" >/tmp/oh_preproc.log 2>&1 &
+    echo $! > /tmp/oh_preproc.pid
+    sleep 1
+    if kill -0 "$(cat /tmp/oh_preproc.pid)" 2>/dev/null; then
+        echo "[INFRA] Pre-processor PID=$(cat /tmp/oh_preproc.pid) em :50051."
+    else
+        echo "[AVISO] Pre-processor não arrancou. Ver /tmp/oh_preproc.log."
+    fi
+else
+    echo "[AVISO] Go não detectado — pre-processor desligado, Gateway irá fail-closed em DATA/ALERT."
+fi
+
 
 osascript -e "tell application \"Terminal\" to do script \"cd '$DIR' && dotnet run --no-build --project OneHealth.Server/OneHealth.Server.csproj\""
 sleep 3 

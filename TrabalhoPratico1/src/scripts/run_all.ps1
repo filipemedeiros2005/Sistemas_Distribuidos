@@ -42,6 +42,20 @@ if (Get-Command "docker" -ErrorAction SilentlyContinue) {
 
 dotnet build OneHealth.sln
 
+# Pre-processor Go service (TP2 - Fase 2).
+if (Get-Command "go" -ErrorAction SilentlyContinue) {
+    Write-Host "[INFRA] A compilar e arrancar pre-processor (Go)..." -ForegroundColor Cyan
+    Push-Location "$DIR\services\preprocessor-go"
+    & make build *> $null
+    Pop-Location
+    $preproc = Start-Process -FilePath "$DIR\services\preprocessor-go\bin\preprocessor" -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\oh_preproc.log"
+    $preproc.Id | Out-File "$env:TEMP\oh_preproc.pid"
+    Start-Sleep -Seconds 1
+    Write-Host "[INFRA] Pre-processor PID=$($preproc.Id) em :50051." -ForegroundColor Green
+} else {
+    Write-Host "[AVISO] Go nao detectado - pre-processor desligado." -ForegroundColor Yellow
+}
+
 Start-Process "dotnet" -ArgumentList "run", "--no-build", "--project", "OneHealth.Server/OneHealth.Server.csproj"
 Start-Sleep -Seconds 3
 
