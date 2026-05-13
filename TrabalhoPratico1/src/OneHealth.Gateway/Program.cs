@@ -201,20 +201,21 @@ namespace OneHealth.Gateway
             Console.ResetColor();
         }
 
-        private static Task OnAmqpMessageAsync(object sender, BasicDeliverEventArgs ea)
+        private static async Task OnAmqpMessageAsync(object sender, BasicDeliverEventArgs ea)
         {
             try
             {
                 var body = ea.Body.ToArray();
-                if (body.Length < 20) return Task.CompletedTask;
+                if (body.Length < 20) return;
 
                 var packet = TelemetryPacket.FromBytes(body);
                 if (!packet.IsValid())
                 {
                     Console.WriteLine($"[CHECKSUM] Pacote descartado de {ea.RoutingKey}.");
-                    return Task.CompletedTask;
+                    return;
                 }
 
+                string zona = "";
                 if (!_sensors.IsEmpty)
                 {
                     if (!_sensors.TryGetValue(packet.SensorID, out var cfg))
@@ -222,9 +223,9 @@ namespace OneHealth.Gateway
                         Console.ForegroundColor = ConsoleColor.DarkYellow;
                         Console.WriteLine($"[FIREWALL] S{packet.SensorID} fora da whitelist — descartado.");
                         Console.ResetColor();
-                        return Task.CompletedTask;
+                        return;
                     }
-                    if (cfg.Estado == "manutencao") return Task.CompletedTask;
+                    if (cfg.Estado == "manutencao") return;
 
                     if (packet.MsgType == MsgType.DATA || packet.MsgType == MsgType.ALERT)
                     {
@@ -233,15 +234,47 @@ namespace OneHealth.Gateway
                             Console.ForegroundColor = ConsoleColor.DarkYellow;
                             Console.WriteLine($"[FIREWALL] S{packet.SensorID}/{packet.DataType} não autorizado — descartado.");
                             Console.ResetColor();
-                            return Task.CompletedTask;
+                            return;
                         }
                     }
 
                     cfg.LastSync = DateTime.UtcNow;
+                    zona = cfg.Zona;
                     if (cfg.Estado.Contains("desativ"))
                     {
                         cfg.Estado = "ativo";
                         EnqueueServerStatus(cfg.Id, 1);
+                    }
+                }
+
+                if (packet.MsgType == MsgType.DATA || packet.MsgType == MsgType.ALERT)
+                {
+                    var result = await PreprocessorClient.NormalizeAsync(
+                        packet.SensorID,
+                        packet.DataType.ToString().ToUpperInvariant(),
+                        packet.Value,
+                        packet.TimeStamp,
+                        zona);
+
+                    if (result == null)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[PREPROC] Indisponível — S{packet.SensorID}/{packet.DataType} descartado (fail-closed).");
+                        Console.ResetColor();
+                        return;
+                    }
+                    if (result.Dropped)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        Console.WriteLine($"[PREPROC] Drop S{packet.SensorID}/{packet.DataType}={packet.Value:F2} ({result.DropReason}).");
+                        Console.ResetColor();
+                        return;
+                    }
+
+                    if (Math.Abs(result.Value - packet.Value) > 1e-6f)
+                    {
+                        Console.WriteLine($"[PREPROC] Normalize S{packet.SensorID}/{packet.DataType} {packet.Value:F2} -> {result.Value:F2}");
+                        packet.Value = (float)result.Value;
                     }
                 }
 
@@ -252,7 +285,6 @@ namespace OneHealth.Gateway
             {
                 Console.WriteLine($"[ERRO CONSUMER] {ex.GetType().Name}: {ex.Message}");
             }
-            return Task.CompletedTask;
         }
 
         private static void EnqueueServerStatus(uint sensorId, float value)
