@@ -247,7 +247,8 @@ namespace OneHealth.Gateway
                     }
                 }
 
-                if (packet.MsgType == MsgType.DATA || packet.MsgType == MsgType.ALERT)
+                // ADR 0022: ALERTs ignoram a pré-processamento — excedem limites canónicos por definição.
+                if (packet.MsgType == MsgType.DATA)
                 {
                     var result = await PreprocessorClient.NormalizeAsync(
                         packet.SensorID,
