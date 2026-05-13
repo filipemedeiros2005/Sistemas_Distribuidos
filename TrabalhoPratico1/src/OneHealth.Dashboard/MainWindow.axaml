@@ -37,6 +37,39 @@
                     </ListBox>
                 </ScrollViewer>
             </TabItem>
+
+            <TabItem Header="Análises">
+                <StackPanel Margin="10" Spacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="Tipo:" Foreground="White" VerticalAlignment="Center"/>
+                        <ComboBox Name="CmbKind" SelectedIndex="0" Width="160">
+                            <ComboBoxItem Content="AVG"/>
+                            <ComboBoxItem Content="STDDEV"/>
+                            <ComboBoxItem Content="ANOMALY_RATE"/>
+                            <ComboBoxItem Content="FORECAST"/>
+                        </ComboBox>
+                        <TextBlock Text="Janela:" Foreground="White" VerticalAlignment="Center" Margin="20,0,0,0"/>
+                        <ComboBox Name="CmbWindow" SelectedIndex="1" Width="100">
+                            <ComboBoxItem Content="1m"/>
+                            <ComboBoxItem Content="5m"/>
+                            <ComboBoxItem Content="15m"/>
+                            <ComboBoxItem Content="1h"/>
+                        </ComboBox>
+                        <Button Name="BtnRunAnalysis" Content="Executar Análise" Click="BtnRunAnalysis_Click"
+                                Background="#3498db" Foreground="White" Padding="12,6"/>
+                        <TextBlock Name="TxtAnalysisStatus" Foreground="#f1c40f" VerticalAlignment="Center" Margin="20,0,0,0"/>
+                    </StackPanel>
+                    <ScrollViewer>
+                        <ListBox Name="LstAnalyses" Background="#1e1e1e" Foreground="White" FontSize="14">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="local:AnaliseItem">
+                                    <TextBlock Text="{Binding Display}" Margin="5,3"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </ScrollViewer>
+                </StackPanel>
+            </TabItem>
         </TabControl>
     </StackPanel>
 </Window>

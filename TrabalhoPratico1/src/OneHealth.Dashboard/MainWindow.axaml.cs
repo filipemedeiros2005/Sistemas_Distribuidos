@@ -8,11 +8,21 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Sockets;
+using System.Threading.Tasks;
 
 namespace OneHealth.Dashboard;
 
 public class AlertaItem {
     public string Texto { get; set; } = "";
+}
+
+public class AnaliseItem {
+    public int Id { get; set; }
+    public string Kind { get; set; } = "";
+    public string ProducedAt { get; set; } = "";
+    public string Summary { get; set; } = "";
+    public string Display => $"#{Id} [{ProducedAt}] {Kind}: {Summary}";
 }
 
 public partial class MainWindow : Window
@@ -21,17 +31,19 @@ public partial class MainWindow : Window
     
     public ObservableCollection<AlertaItem> Alertas { get; set; } = new();
     public ObservableCollection<string> Sensores { get; set; } = new();
-    public ObservableCollection<string> TelemetriaGlobal { get; set; } = new(); 
-    
+    public ObservableCollection<string> TelemetriaGlobal { get; set; } = new();
+    public ObservableCollection<AnaliseItem> Analises { get; set; } = new();
+
     private DispatcherTimer _timer;
 
     public MainWindow()
     {
         InitializeComponent();
-        LstAlerts.ItemsSource = Alertas; 
-        LstSensors.ItemsSource = Sensores; 
-        LstTelemetry.ItemsSource = TelemetriaGlobal; 
-        
+        LstAlerts.ItemsSource = Alertas;
+        LstSensors.ItemsSource = Sensores;
+        LstTelemetry.ItemsSource = TelemetriaGlobal;
+        LstAnalyses.ItemsSource = Analises;
+
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (s, e) => AtualizarDashboards();
         _timer.Start();
@@ -43,6 +55,7 @@ public partial class MainWindow : Window
             using var conn = new NpgsqlConnection(DB_CONNECTION); conn.Open();
             CarregarSensores(conn);
             CarregarDados(conn);
+            CarregarAnalises(conn);
         } catch (Exception ex) {
             Console.WriteLine($"[DASHBOARD] {ex.GetType().Name}: {ex.Message}");
         }
@@ -92,6 +105,54 @@ public partial class MainWindow : Window
             long cloudBytes = new DirectoryInfo(cloudDir).GetFiles("*.raw").Sum(f => f.Length);
             txtServer.Text = $"Backups de Emergencia (Servidor): {cloudBytes / 1024} KB recebidos.";
         }
+    }
+
+    private void CarregarAnalises(NpgsqlConnection conn)
+    {
+        Analises.Clear();
+        using var cmd = new NpgsqlCommand(
+            "SELECT id, kind, produced_at, summary FROM analysis_results ORDER BY id DESC LIMIT 50", conn);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) {
+            Analises.Add(new AnaliseItem {
+                Id = reader.GetInt32(0),
+                Kind = reader.GetString(1),
+                ProducedAt = reader.GetDateTime(2).ToString("HH:mm:ss"),
+                Summary = reader.GetString(3)
+            });
+        }
+    }
+
+    public async void BtnRunAnalysis_Click(object? sender, RoutedEventArgs e)
+    {
+        var kind = (CmbKind.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "AVG";
+        var window = (CmbWindow.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "5m";
+
+        BtnRunAnalysis.IsEnabled = false;
+        TxtAnalysisStatus.Text = $"[...] {kind} / {window}";
+        try {
+            var response = await SendAnalysisRequestAsync($"KIND={kind}|WINDOW={window}");
+            TxtAnalysisStatus.Text = response;
+            TxtAnalysisStatus.Foreground = response.StartsWith("OK")
+                ? Avalonia.Media.Brushes.LightGreen
+                : Avalonia.Media.Brushes.OrangeRed;
+        } catch (Exception ex) {
+            TxtAnalysisStatus.Text = $"ERR {ex.GetType().Name}: {ex.Message}";
+            TxtAnalysisStatus.Foreground = Avalonia.Media.Brushes.OrangeRed;
+        } finally {
+            BtnRunAnalysis.IsEnabled = true;
+        }
+    }
+
+    private static async Task<string> SendAnalysisRequestAsync(string line)
+    {
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync("localhost", 5006);
+        using var stream = tcp.GetStream();
+        using var writer = new StreamWriter(stream) { AutoFlush = true, NewLine = "\n" };
+        using var reader = new StreamReader(stream);
+        await writer.WriteLineAsync(line);
+        return await reader.ReadLineAsync() ?? "ERR no response";
     }
 
     public void BtnVerVideo_Click(object? sender, RoutedEventArgs e) {
