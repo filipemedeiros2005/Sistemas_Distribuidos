@@ -2,6 +2,9 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using LiveChartsCore;
+using LiveChartsCore.Defaults;
+using LiveChartsCore.SkiaSharpView;
 using Npgsql;
 using System;
 using System.Collections.ObjectModel;
@@ -9,6 +12,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace OneHealth.Dashboard;
@@ -34,11 +38,22 @@ public partial class MainWindow : Window
     public ObservableCollection<string> TelemetriaGlobal { get; set; } = new();
     public ObservableCollection<AnaliseItem> Analises { get; set; } = new();
 
+    public ObservableCollection<ISeries> ChartSeriesData { get; } = new();
+    public Axis[] ChartXAxes { get; }
+
     private DispatcherTimer _timer;
+    private int? _lastLoadedAnalysisId;
 
     public MainWindow()
     {
         InitializeComponent();
+        ChartXAxes = new[] {
+            new Axis {
+                Labeler = v => DateTimeOffset.FromUnixTimeSeconds((long)v).LocalDateTime.ToString("HH:mm:ss")
+            }
+        };
+        DataContext = this;
+
         LstAlerts.ItemsSource = Alertas;
         LstSensors.ItemsSource = Sensores;
         LstTelemetry.ItemsSource = TelemetriaGlobal;
@@ -109,6 +124,7 @@ public partial class MainWindow : Window
 
     private void CarregarAnalises(NpgsqlConnection conn)
     {
+        var prevId = (LstAnalyses.SelectedItem as AnaliseItem)?.Id;
         Analises.Clear();
         using var cmd = new NpgsqlCommand(
             "SELECT id, kind, produced_at, summary FROM analysis_results ORDER BY id DESC LIMIT 50", conn);
@@ -121,7 +137,40 @@ public partial class MainWindow : Window
                 Summary = reader.GetString(3)
             });
         }
+        if (prevId is int id) {
+            var match = Analises.FirstOrDefault(a => a.Id == id);
+            if (match != null) LstAnalyses.SelectedItem = match;
+        }
     }
+
+    public async void LstAnalyses_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (LstAnalyses.SelectedItem is not AnaliseItem item) return;
+        if (_lastLoadedAnalysisId == item.Id) return;
+        _lastLoadedAnalysisId = item.Id;
+        try {
+            await using var conn = new NpgsqlConnection(DB_CONNECTION);
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(
+                "SELECT series FROM analysis_results WHERE id = @id", conn);
+            cmd.Parameters.AddWithValue("id", item.Id);
+            var json = (string?)(await cmd.ExecuteScalarAsync()) ?? "[]";
+            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var points = JsonSerializer.Deserialize<SeriesPoint[]>(json, opts) ?? Array.Empty<SeriesPoint>();
+
+            ChartSeriesData.Clear();
+            foreach (var grp in points.GroupBy(p => p.Label)) {
+                ChartSeriesData.Add(new LineSeries<ObservablePoint> {
+                    Name = grp.Key,
+                    Values = grp.Select(p => new ObservablePoint(p.Ts, p.Value)).ToArray()
+                });
+            }
+        } catch (Exception ex) {
+            Console.WriteLine($"[DASHBOARD] chart load #{item.Id}: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private record SeriesPoint(long Ts, double Value, string Label);
 
     public async void BtnRunAnalysis_Click(object? sender, RoutedEventArgs e)
     {
