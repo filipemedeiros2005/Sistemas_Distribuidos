@@ -49,6 +49,17 @@ namespace OneHealth.Server
                     CREATE TABLE IF NOT EXISTS sensor_status (
                         sensor_id BIGINT PRIMARY KEY, status VARCHAR(20), last_seen TIMESTAMP
                     );
+                    -- analysis_results: histórico, NÃO truncar entre execuções.
+                    CREATE TABLE IF NOT EXISTS analysis_results (
+                        id SERIAL PRIMARY KEY,
+                        kind VARCHAR(20) NOT NULL,
+                        from_ts TIMESTAMP NOT NULL,
+                        to_ts TIMESTAMP NOT NULL,
+                        produced_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+                        summary TEXT NOT NULL,
+                        metrics JSONB NOT NULL,
+                        series JSONB NOT NULL
+                    );
                     TRUNCATE TABLE telemetry RESTART IDENTITY CASCADE;
                     TRUNCATE TABLE sensor_status RESTART IDENTITY CASCADE;
                 ", conn);
