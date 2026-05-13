@@ -1,7 +1,9 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="using:OneHealth.Dashboard"
+        xmlns:lvc="using:LiveChartsCore.SkiaSharpView.Avalonia"
         x:Class="OneHealth.Dashboard.MainWindow"
+        x:DataType="local:MainWindow"
         Title="One Health - Command Center" Width="1100" Height="700" Background="#121212">
     
     <StackPanel Margin="20" Spacing="10">
@@ -39,8 +41,8 @@
             </TabItem>
 
             <TabItem Header="Análises">
-                <StackPanel Margin="10" Spacing="10">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
+                <Grid Margin="10" RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
                         <TextBlock Text="Tipo:" Foreground="White" VerticalAlignment="Center"/>
                         <ComboBox Name="CmbKind" SelectedIndex="0" Width="160">
                             <ComboBoxItem Content="AVG"/>
@@ -59,7 +61,7 @@
                                 Background="#3498db" Foreground="White" Padding="12,6"/>
                         <TextBlock Name="TxtAnalysisStatus" Foreground="#f1c40f" VerticalAlignment="Center" Margin="20,0,0,0"/>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="10">
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10">
                         <TextBlock Text="Zona:" Foreground="White" VerticalAlignment="Center"/>
                         <ComboBox Name="CmbZona" SelectedIndex="0" Width="170">
                             <ComboBoxItem Content="(todas)"/>
@@ -79,16 +81,22 @@
                         <TextBlock Text="Sensores:" Foreground="White" VerticalAlignment="Center" Margin="15,0,0,0"/>
                         <TextBox Name="TxtSensors" Width="120" PlaceholderText="101,102"/>
                     </StackPanel>
-                    <ScrollViewer>
-                        <ListBox Name="LstAnalyses" Background="#1e1e1e" Foreground="White" FontSize="14">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate x:DataType="local:AnaliseItem">
-                                    <TextBlock Text="{Binding Display}" Margin="5,3"/>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                    </ScrollViewer>
-                </StackPanel>
+                    <Grid Grid.Row="2" ColumnDefinitions="380,*">
+                        <ScrollViewer Grid.Column="0">
+                            <ListBox Name="LstAnalyses" SelectionChanged="LstAnalyses_SelectionChanged"
+                                     Background="#1e1e1e" Foreground="White" FontSize="13">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="local:AnaliseItem">
+                                        <TextBlock Text="{Binding Display}" Margin="5,3" TextWrapping="Wrap"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </ScrollViewer>
+                        <lvc:CartesianChart Grid.Column="1" Name="ChartAnalysis" Margin="10,0,0,0"
+                                            Series="{Binding ChartSeriesData}"
+                                            XAxes="{Binding ChartXAxes}"/>
+                    </Grid>
+                </Grid>
             </TabItem>
         </TabControl>
     </StackPanel>
