@@ -128,10 +128,32 @@ public partial class MainWindow : Window
         var kind = (CmbKind.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "AVG";
         var window = (CmbWindow.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "5m";
 
+        var parts = new System.Collections.Generic.List<string> { $"KIND={kind}", $"WINDOW={window}" };
+
+        var types = new (string Name, CheckBox Chk)[] {
+            ("TEMP", ChkTEMP), ("HUM", ChkHUM), ("PM25", ChkPM25),
+            ("PM10", ChkPM10), ("RUIDO", ChkRUIDO), ("LUM", ChkLUM)
+        }.Where(t => t.Chk.IsChecked == true).Select(t => t.Name).ToArray();
+        if (types.Length > 0) parts.Add("TYPES=" + string.Join(",", types));
+
+        // SENSORS tem prioridade sobre ZONA: AnalysisCoordinator.cs só resolve zona se sensorIds vier vazio.
+        var sensors = TxtSensors.Text?.Trim();
+        if (!string.IsNullOrEmpty(sensors)) {
+            parts.Add("SENSORS=" + sensors);
+        } else if (CmbZona.SelectedItem is ComboBoxItem zItem
+                   && zItem.Content?.ToString() is string zona
+                   && zona != "(todas)") {
+            parts.Add("ZONA=" + zona);
+        }
+
+        if (kind == "FORECAST") parts.Add("HORIZON=10");
+
+        var line = string.Join("|", parts);
+
         BtnRunAnalysis.IsEnabled = false;
-        TxtAnalysisStatus.Text = $"[...] {kind} / {window}";
+        TxtAnalysisStatus.Text = $"[...] {line}";
         try {
-            var response = await SendAnalysisRequestAsync($"KIND={kind}|WINDOW={window}");
+            var response = await SendAnalysisRequestAsync(line);
             TxtAnalysisStatus.Text = response;
             TxtAnalysisStatus.Foreground = response.StartsWith("OK")
                 ? Avalonia.Media.Brushes.LightGreen

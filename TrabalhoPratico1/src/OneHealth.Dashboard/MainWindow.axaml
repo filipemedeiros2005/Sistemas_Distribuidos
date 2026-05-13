@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="using:OneHealth.Dashboard"
         x:Class="OneHealth.Dashboard.MainWindow"
-        Title="One Health - Command Center" Width="950" Height="700" Background="#121212">
+        Title="One Health - Command Center" Width="1100" Height="700" Background="#121212">
     
     <StackPanel Margin="20" Spacing="10">
         <TextBlock Text="One Health - Gestao Urbana" FontSize="26" FontWeight="Bold" Foreground="#3498db"/>
@@ -58,6 +58,26 @@
                         <Button Name="BtnRunAnalysis" Content="Executar Análise" Click="BtnRunAnalysis_Click"
                                 Background="#3498db" Foreground="White" Padding="12,6"/>
                         <TextBlock Name="TxtAnalysisStatus" Foreground="#f1c40f" VerticalAlignment="Center" Margin="20,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="Zona:" Foreground="White" VerticalAlignment="Center"/>
+                        <ComboBox Name="CmbZona" SelectedIndex="0" Width="170">
+                            <ComboBoxItem Content="(todas)"/>
+                            <ComboBoxItem Content="ZONA_NORTE"/>
+                            <ComboBoxItem Content="ZONA_SUL"/>
+                            <ComboBoxItem Content="ZONA_CENTRO"/>
+                            <ComboBoxItem Content="ZONA_INDUSTRIAL"/>
+                            <ComboBoxItem Content="ZONA_ESPECIAL"/>
+                        </ComboBox>
+                        <TextBlock Text="Tipos:" Foreground="White" VerticalAlignment="Center" Margin="15,0,0,0"/>
+                        <CheckBox Name="ChkTEMP"  Content="TEMP"  Foreground="White"/>
+                        <CheckBox Name="ChkHUM"   Content="HUM"   Foreground="White"/>
+                        <CheckBox Name="ChkPM25"  Content="PM25"  Foreground="White"/>
+                        <CheckBox Name="ChkPM10"  Content="PM10"  Foreground="White"/>
+                        <CheckBox Name="ChkRUIDO" Content="RUIDO" Foreground="White"/>
+                        <CheckBox Name="ChkLUM"   Content="LUM"   Foreground="White"/>
+                        <TextBlock Text="Sensores:" Foreground="White" VerticalAlignment="Center" Margin="15,0,0,0"/>
+                        <TextBox Name="TxtSensors" Width="120" PlaceholderText="101,102"/>
                     </StackPanel>
                     <ScrollViewer>
                         <ListBox Name="LstAnalyses" Background="#1e1e1e" Foreground="White" FontSize="14">
