@@ -1,5 +1,11 @@
-﻿using OneHealth.Sensor.Configuration;
+﻿using System.Globalization;
+using OneHealth.Common;
+using OneHealth.Sensor.Configuration;
 using OneHealth.Sensor.Csv;
+using OneHealth.Sensor.Detection;
+using OneHealth.Sensor.Publishing;
+
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 
 try
 {
@@ -10,16 +16,25 @@ try
     var csvPath = ResolveSimulationCsvPath(options.SensorId);
     Console.WriteLine($"[BOOT] Reading from {csvPath}");
 
-    var reader = new CsvSimulationReader(csvPath);
+    var reader     = new CsvSimulationReader(csvPath);
+    var classifier = new AnomalyClassifier();
 
-    // Wire Ctrl+C → cancel the read loop gracefully.
+    await using var publisher = new RabbitMqPublisher(options.Zone, options.SensorId);
+    Console.WriteLine("[BOOT] Connecting to RabbitMQ at localhost:5672...");
+    await publisher.ConnectAsync();
+    Console.WriteLine("[BOOT] Connected.");
+
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) =>
     {
-        e.Cancel = true;          // prevent the runtime from killing us instantly
-        cts.Cancel();             // signal our loop to stop
+        e.Cancel = true;
+        cts.Cancel();
         Console.WriteLine("\n[SHUTDOWN] Ctrl+C received, stopping...");
     };
+
+    // HELLO — announces the sensor is alive. Payload value is unused.
+    await publisher.PublishAsync(BuildEnvelopePacket(options.SensorId, MsgType.Hello));
+    Console.WriteLine("[PUB ] HELLO sent.");
 
     var count = 0;
     try
@@ -27,17 +42,41 @@ try
         await foreach (var reading in reader.ReadLoopAsync(cts.Token))
         {
             count++;
-            Console.WriteLine(
-                $"[READ #{count:D4}] {reading.DataType,-6} = {reading.Value,8:F2}   (delay {reading.DelayMs,4}ms)");
+            var msgType  = classifier.Classify(reading.DataType, reading.Value);
+            var dataType = DataTypeMapping.FromName(reading.DataType);
 
-            // Smoke-test cap — will be removed in checkpoint 2.J once the
-            // publisher is wired in and the sensor is meant to run forever.
+            var packet = new TelemetryPacket
+            {
+                SensorId  = options.SensorId,
+                MsgType   = msgType,
+                DataType  = dataType,
+                Value     = (float)reading.Value,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+
+            await publisher.PublishAsync(packet, cts.Token);
+
+            Console.WriteLine(
+                $"[PUB #{count:D4}] {msgType,-5} {reading.DataType,-6} = {reading.Value,9:F2}   (delay {reading.DelayMs,4}ms)");
+
+            // Smoke-test cap; removed in checkpoint 2.J when sensor runs indefinitely.
             if (count >= 30) { cts.Cancel(); break; }
         }
     }
-    catch (OperationCanceledException) { /* expected on Ctrl+C */ }
+    catch (OperationCanceledException) { /* expected */ }
 
-    Console.WriteLine($"[SHUTDOWN] Read {count} readings total. Goodbye.");
+    // BYE — graceful farewell, even if the loop ended abruptly.
+    try
+    {
+        await publisher.PublishAsync(BuildEnvelopePacket(options.SensorId, MsgType.Bye));
+        Console.WriteLine("[PUB ] BYE sent.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[WARN] BYE publish failed: {ex.Message}");
+    }
+
+    Console.WriteLine($"[SHUTDOWN] Published {count} readings. Goodbye.");
 }
 catch (ArgumentException ex)
 {
@@ -54,10 +93,6 @@ catch (Exception ex)
 
 static string ResolveSimulationCsvPath(uint sensorId)
 {
-    // Walk up from the current directory until OneHealth.sln is found.
-    // This makes the path resolution work whether the binary is launched
-    // via `dotnet run --project src/OneHealth.Sensor` (cwd = csproj dir)
-    // or from the repo root, or even from a published artifact.
     var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
     while (dir != null && !File.Exists(Path.Combine(dir.FullName, "OneHealth.sln")))
         dir = dir.Parent;
@@ -68,3 +103,13 @@ static string ResolveSimulationCsvPath(uint sensorId)
 
     return Path.Combine(dir.FullName, "data", "simulation", $"sensor_{sensorId}.csv");
 }
+
+static TelemetryPacket BuildEnvelopePacket(uint sensorId, MsgType msgType) =>
+    new()
+    {
+        SensorId  = sensorId,
+        MsgType   = msgType,
+        DataType  = DataType.Heartbeat,   // not a real measurement
+        Value     = 0f,
+        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    };
