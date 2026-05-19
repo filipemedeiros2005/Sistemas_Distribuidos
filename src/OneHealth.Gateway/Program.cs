@@ -4,6 +4,7 @@ using OneHealth.Common;
 using OneHealth.Gateway.Configuration;
 using OneHealth.Gateway.Consuming;
 using OneHealth.Gateway.Preprocessing;
+using OneHealth.Gateway.Publishing;
 using OneHealth.Gateway.Registry;
 
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
@@ -23,6 +24,10 @@ try
     await using var registry = new SensorRegistry(PgConnectionString());
     await registry.InitSchemaAsync();
     Console.WriteLine("[BOOT] PostgreSQL connected; 'sensors' table ready.");
+
+    await using var aggregator = new AggregatePublisher(options.Port);
+    await aggregator.ConnectAsync();
+    Console.WriteLine("[BOOT] Aggregator publisher → exchange 'onehealth.aggregated'");
 
     await using var consumer = new RabbitMqConsumer(options.Port, options.Zones);
     Console.WriteLine("[BOOT] Connecting to RabbitMQ at localhost:5672...");
@@ -79,6 +84,16 @@ try
             bypassed++;
             Console.WriteLine(
                 $"[BYPASS #{recv:D4}] {packet.MsgType,-6} {packet.DataType,-11} sid={packet.SensorId}");
+
+            // Alerts carry real anomaly readings — forward them downstream so
+            // the Server can persist + show them on the Dashboard. Hello/Status/Bye
+            // are control messages with no measurement value: kept in the registry
+            // only, never aggregated.
+            if (packet.MsgType == MsgType.Alert &&
+                options.AllowedSensors.TryGetValue(packet.SensorId, out var alertEntry))
+            {
+                await aggregator.PublishAsync(packet, alertEntry.Zone, cts.Token);
+            }
             return ConsumeOutcome.Ack;
         }
 
@@ -93,6 +108,14 @@ try
                     $"[DROP   #{recv:D4}] {packet.DataType,-11} sid={packet.SensorId,-3} " +
                     $"raw={packet.Value,9:F2} reason={result.DropReason}");
                 return ConsumeOutcome.Ack;     // processed cleanly — message done
+            }
+
+            // Substitute the value with the canonical/normalised one and
+            // re-publish to the aggregated exchange for the Server.
+            var normalised = packet with { Value = (float)result.Value };
+            if (options.AllowedSensors.TryGetValue(packet.SensorId, out var entry))
+            {
+                await aggregator.PublishAsync(normalised, entry.Zone, cts.Token);
             }
 
             fwd++;
