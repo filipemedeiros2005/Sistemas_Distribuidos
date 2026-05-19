@@ -3,6 +3,7 @@ using OneHealth.Common;
 using OneHealth.Sensor.Configuration;
 using OneHealth.Sensor.Csv;
 using OneHealth.Sensor.Detection;
+using OneHealth.Sensor.Heartbeat;
 using OneHealth.Sensor.Publishing;
 
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
@@ -36,6 +37,12 @@ try
     await publisher.PublishAsync(BuildEnvelopePacket(options.SensorId, MsgType.Hello));
     Console.WriteLine("[PUB ] HELLO sent.");
 
+    // Start the heartbeat in the background. 5s for the smoke test so we see
+    // several beats during the ~25s cycle; will move to 30s in checkpoint 2.J.
+    var heartbeat = new HeartbeatTimer(
+        publisher, options.SensorId, TimeSpan.FromSeconds(5));
+    var heartbeatTask = heartbeat.RunAsync(cts.Token);
+
     var count = 0;
     try
     {
@@ -64,6 +71,10 @@ try
         }
     }
     catch (OperationCanceledException) { /* expected */ }
+
+    // Wait for the heartbeat to settle before sending BYE — same channel,
+    // and the channel is not thread-safe under concurrent publish.
+    await heartbeatTask;
 
     // BYE — graceful farewell, even if the loop ended abruptly.
     try
