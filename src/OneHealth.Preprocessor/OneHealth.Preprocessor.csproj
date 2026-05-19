@@ -7,11 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\greet.proto" GrpcServices="Server" />
+    <Protobuf Include="..\protos\preprocessing.proto" GrpcServices="Server" Link="Protos\preprocessing.proto" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Grpc.AspNetCore" Version="2.64.0" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.66.0" />
   </ItemGroup>
 
 </Project>

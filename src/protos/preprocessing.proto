@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package OneHealth.preprocessing;
+
+option csharp_namespace = "OneHealth.Grpc.Preprocessing";
+
+// Pre-processing service: validates and normalizes individual telemetry
+// measurements before they are stored. Stateless and idempotent.
+service PreProcessor {
+  // Normalizes a single raw measurement. Returns the normalized value
+  // or, if the measurement is invalid, sets `dropped = true` with a reason.
+  rpc Normalize (RawMeasurement) returns (NormalizedMeasurement);
+}
+
+// Raw measurement as published by a sensor and forwarded by a gateway.
+message RawMeasurement {
+  uint32 sensor_id  = 1;
+  string data_type  = 2;  // "TEMP", "HUM", "PM25", "PM10", "NOISE", "LUM"
+  double value      = 3;
+  uint64 unix_ts    = 4;  // milliseconds since epoch
+  string unit_hint  = 5;  // "C", "F", "K" — used for temperature normalization
+  uint32 msg_type   = 6;  // 1=DATA, 2=ALERT (ALERT bypasses this RPC, see design rule 2.5)
+}
+
+// Normalized measurement returned by the pre-processor.
+message NormalizedMeasurement {
+  uint32 sensor_id   = 1;
+  string data_type   = 2;
+  double value       = 3;  // canonical unit (Celsius for TEMP, etc.)
+  uint64 unix_ts     = 4;
+  bool   dropped     = 5;  // true if the measurement was rejected
+  string drop_reason = 6;  // e.g. "out_of_bounds:TEMP", "nan_or_inf"
+}
