@@ -13,6 +13,24 @@ namespace OneHealth.Gateway.Consuming;
 /// so the gateway receives everything from its topology without caring about
 /// data types or sensor ids.
 /// </summary>
+/// <summary>
+/// What the consumer should do with the current message after the handler
+/// runs. Explicit so handlers don't need to communicate intent via exceptions.
+/// </summary>
+public enum ConsumeOutcome
+{
+    /// <summary>Successfully processed. Acknowledge to the broker.</summary>
+    Ack,
+
+    /// <summary>Transient failure (e.g. downstream service down). Requeue for a
+    /// later attempt — RabbitMQ will re-deliver when this consumer is ready.</summary>
+    RequeueAndRetry,
+
+    /// <summary>Permanent failure (corrupt data, invalid sensor). Drop without
+    /// requeue to avoid an infinite loop.</summary>
+    DropPoison
+}
+
 public sealed class RabbitMqConsumer : IAsyncDisposable
 {
     public const string ExchangeName = "onehealth.telemetry";
@@ -99,13 +117,13 @@ public sealed class RabbitMqConsumer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Starts consuming from the bound queue. The handler is invoked for each
-    /// well-formed packet; well-formed packets are acked. Packets that throw
-    /// during decode or handling are NACKed with <c>requeue=false</c> (poison
-    /// pattern — would loop forever otherwise).
+    /// Starts consuming from the bound queue. For each well-formed packet the
+    /// handler is invoked and its returned <see cref="ConsumeOutcome"/> drives
+    /// the ack/nack decision. Decoding failures (malformed payload) are dropped
+    /// as poison — they would loop forever otherwise.
     /// </summary>
     public async Task ConsumeAsync(
-        Func<TelemetryPacket, string, Task> onMessage,
+        Func<TelemetryPacket, string, Task<ConsumeOutcome>> onMessage,
         CancellationToken cancellationToken)
     {
         if (_channel is null || _queueName is null)
@@ -114,18 +132,44 @@ public sealed class RabbitMqConsumer : IAsyncDisposable
         var consumer = new AsyncEventingBasicConsumer(_channel);
         consumer.ReceivedAsync += async (_, ea) =>
         {
+            TelemetryPacket packet;
             try
             {
-                var packet = TelemetryPacket.FromBytes(ea.Body.Span);
-                await onMessage(packet, ea.RoutingKey);
-                await _channel.BasicAckAsync(ea.DeliveryTag, multiple: false);
+                packet = TelemetryPacket.FromBytes(ea.Body.Span);
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine(
-                    $"[CONSUMER] Failed to process key={ea.RoutingKey}: {ex.Message}");
-                // poison message — drop instead of requeuing forever
+                    $"[CONSUMER] Decode failure key={ea.RoutingKey}: {ex.Message}");
                 await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                return;
+            }
+
+            ConsumeOutcome outcome;
+            try
+            {
+                outcome = await onMessage(packet, ea.RoutingKey);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"[CONSUMER] Handler threw on key={ea.RoutingKey}: {ex.Message}");
+                // Unexpected handler exception → drop as poison.
+                await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                return;
+            }
+
+            switch (outcome)
+            {
+                case ConsumeOutcome.Ack:
+                    await _channel.BasicAckAsync(ea.DeliveryTag, multiple: false);
+                    break;
+                case ConsumeOutcome.RequeueAndRetry:
+                    await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: true);
+                    break;
+                case ConsumeOutcome.DropPoison:
+                    await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                    break;
             }
         };
 

@@ -1,6 +1,9 @@
 using System.Globalization;
+using Grpc.Core;
+using OneHealth.Common;
 using OneHealth.Gateway.Configuration;
 using OneHealth.Gateway.Consuming;
+using OneHealth.Gateway.Preprocessing;
 
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 
@@ -12,6 +15,9 @@ try
     Console.WriteLine(
         $"[BOOT] Gateway port={options.Port} | zones=[{string.Join(", ", options.Zones)}] | " +
         $"sensors={options.AllowedSensors.Count}");
+
+    using var preprocessor = new PreprocessorClient();
+    Console.WriteLine("[BOOT] Pre-processor client → http://localhost:50051");
 
     await using var consumer = new RabbitMqConsumer(options.Port, options.Zones);
     Console.WriteLine("[BOOT] Connecting to RabbitMQ at localhost:5672...");
@@ -35,17 +41,55 @@ try
             Console.WriteLine("\n[SHUTDOWN] SIGTERM received, stopping...");
         });
 
-    var count = 0;
-    await consumer.ConsumeAsync((packet, routingKey) =>
+    var recv = 0; var fwd = 0; var dropped = 0; var bypassed = 0; var retried = 0;
+
+    await consumer.ConsumeAsync(async (packet, routingKey) =>
     {
-        count++;
-        Console.WriteLine(
-            $"[RECV #{count:D4}] {packet.MsgType,-6} {packet.DataType,-11} " +
-            $"sid={packet.SensorId,-3} val={packet.Value,9:F2}   key={routingKey}");
-        return Task.CompletedTask;
+        recv++;
+
+        // Design rule 2.5: only Data packets go through pre-processing.
+        // Hello/Bye/Status/Alert bypass the RPC entirely.
+        if (packet.MsgType != MsgType.Data)
+        {
+            bypassed++;
+            Console.WriteLine(
+                $"[BYPASS #{recv:D4}] {packet.MsgType,-6} {packet.DataType,-11} sid={packet.SensorId}");
+            return ConsumeOutcome.Ack;
+        }
+
+        try
+        {
+            var result = await preprocessor.NormalizeAsync(packet, cts.Token);
+
+            if (result.Dropped)
+            {
+                dropped++;
+                Console.WriteLine(
+                    $"[DROP   #{recv:D4}] {packet.DataType,-11} sid={packet.SensorId,-3} " +
+                    $"raw={packet.Value,9:F2} reason={result.DropReason}");
+                return ConsumeOutcome.Ack;     // processed cleanly — message done
+            }
+
+            fwd++;
+            Console.WriteLine(
+                $"[FWD    #{recv:D4}] {packet.DataType,-11} sid={packet.SensorId,-3} " +
+                $"raw={packet.Value,9:F2} norm={result.Value,9:F2}");
+            return ConsumeOutcome.Ack;
+        }
+        catch (RpcException ex)
+        {
+            // Pre-processor down or unreachable. Requeue so the message comes
+            // back when the service is healthy again. The broker has it stored.
+            retried++;
+            Console.Error.WriteLine(
+                $"[RETRY  #{recv:D4}] {packet.DataType} sid={packet.SensorId} — pre-processor unreachable " +
+                $"({ex.StatusCode}): {ex.Status.Detail}");
+            return ConsumeOutcome.RequeueAndRetry;
+        }
     }, cts.Token);
 
-    Console.WriteLine($"[SHUTDOWN] Received {count} messages total. Goodbye.");
+    Console.WriteLine(
+        $"[SHUTDOWN] recv={recv} fwd={fwd} dropped={dropped} bypassed={bypassed} retried={retried}. Goodbye.");
 }
 catch (ArgumentException ex)
 {
