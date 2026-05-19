@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using OneHealth.Preprocessor.Authorization;
 using OneHealth.Preprocessor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,8 +11,13 @@ builder.WebHost.ConfigureKestrel(options =>
     options.ListenLocalhost(50051, listen => listen.Protocols = HttpProtocols.Http2);
 });
 
-// gRPC server with the PreProcessor implementation. The service is stateless,
-// so DI registration as transient (the default) is fine.
+// Authorization cache: queries the PostgreSQL `sensors` table populated by
+// the Gateway. Singleton so the in-memory cache and Mutex survive across
+// concurrent Normalize calls.
+var pgConn = Environment.GetEnvironmentVariable("ONEHEALTH_PG_CONN")
+             ?? $"Host=localhost;Port=5432;Database=onehealth;Username={Environment.UserName}";
+builder.Services.AddSingleton(new SensorAuthorizationCache(pgConn));
+
 builder.Services.AddGrpc();
 
 var app = builder.Build();

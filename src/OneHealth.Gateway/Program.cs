@@ -4,6 +4,7 @@ using OneHealth.Common;
 using OneHealth.Gateway.Configuration;
 using OneHealth.Gateway.Consuming;
 using OneHealth.Gateway.Preprocessing;
+using OneHealth.Gateway.Registry;
 
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 
@@ -18,6 +19,10 @@ try
 
     using var preprocessor = new PreprocessorClient();
     Console.WriteLine("[BOOT] Pre-processor client → http://localhost:50051");
+
+    await using var registry = new SensorRegistry(PgConnectionString());
+    await registry.InitSchemaAsync();
+    Console.WriteLine("[BOOT] PostgreSQL connected; 'sensors' table ready.");
 
     await using var consumer = new RabbitMqConsumer(options.Port, options.Zones);
     Console.WriteLine("[BOOT] Connecting to RabbitMQ at localhost:5672...");
@@ -46,6 +51,26 @@ try
     await consumer.ConsumeAsync(async (packet, routingKey) =>
     {
         recv++;
+
+        // Hello / Status / Bye → refresh the sensor's row in the registry so
+        // the Preprocessor's authorisation check (and any future watchdog)
+        // can rely on a live view of who is alive.
+        if (packet.MsgType is MsgType.Hello or MsgType.Status or MsgType.Bye)
+        {
+            if (options.AllowedSensors.TryGetValue(packet.SensorId, out var entry))
+            {
+                var newStatus = packet.MsgType == MsgType.Bye ? "OFFLINE" : "ONLINE";
+                try { await registry.UpsertAsync(packet.SensorId, entry.Zone, newStatus, cts.Token); }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[REGISTRY] UPSERT failed for sid={packet.SensorId}: {ex.Message}");
+                }
+            }
+            else
+            {
+                Console.Error.WriteLine($"[REGISTRY] {packet.MsgType} from unknown sid={packet.SensorId} — skipping UPSERT");
+            }
+        }
 
         // Design rule 2.5: only Data packets go through pre-processing.
         // Hello/Bye/Status/Alert bypass the RPC entirely.
@@ -76,15 +101,24 @@ try
                 $"raw={packet.Value,9:F2} norm={result.Value,9:F2}");
             return ConsumeOutcome.Ack;
         }
-        catch (RpcException ex)
+        catch (RpcException ex) when (ex.StatusCode is StatusCode.Unavailable or StatusCode.DeadlineExceeded)
         {
-            // Pre-processor down or unreachable. Requeue so the message comes
-            // back when the service is healthy again. The broker has it stored.
+            // Truly transient — service down or slow. Requeue so the message
+            // comes back when the service is healthy again.
             retried++;
             Console.Error.WriteLine(
-                $"[RETRY  #{recv:D4}] {packet.DataType} sid={packet.SensorId} — pre-processor unreachable " +
-                $"({ex.StatusCode}): {ex.Status.Detail}");
+                $"[RETRY  #{recv:D4}] {packet.DataType} sid={packet.SensorId} — transient ({ex.StatusCode}): {ex.Status.Detail}");
             return ConsumeOutcome.RequeueAndRetry;
+        }
+        catch (RpcException ex)
+        {
+            // Server-side bug (Unknown/Internal/etc.) — requeuing would loop
+            // forever. Drop as poison so the system stays healthy; log loudly
+            // because this is something the operator must investigate.
+            dropped++;
+            Console.Error.WriteLine(
+                $"[POISON #{recv:D4}] {packet.DataType} sid={packet.SensorId} — RPC fault ({ex.StatusCode}): {ex.Status.Detail}");
+            return ConsumeOutcome.DropPoison;
         }
     }, cts.Token);
 
@@ -108,6 +142,10 @@ catch (Exception ex)
 }
 
 // --- helpers ---------------------------------------------------------------
+
+static string PgConnectionString() =>
+    Environment.GetEnvironmentVariable("ONEHEALTH_PG_CONN")
+    ?? $"Host=localhost;Port=5432;Database=onehealth;Username={Environment.UserName}";
 
 static string ResolveGatewayConfigDir()
 {

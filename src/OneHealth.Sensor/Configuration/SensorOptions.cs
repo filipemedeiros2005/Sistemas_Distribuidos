@@ -55,6 +55,7 @@ public class SensorOptions
     {
         101 or 102 => "ZONE_NORTH",
         103 or 104 => "ZONE_SOUTH",
+        999 => "ZONE_NORTH",   // ad-hoc "rogue sensor" id for manual unauthorized-flow tests
         _ => throw new ArgumentException(
             $"Unknown sensor_id {sensorId} — no zone configured. " +
             "Add it to SensorOptions.ResolveZone() to register a new sensor.")
