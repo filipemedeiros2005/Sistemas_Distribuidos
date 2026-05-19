@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OneHealth.Common\OneHealth.Common.csproj" />
+    <ProjectReference Include="..\OneHealth.Preprocessor\OneHealth.Preprocessor.csproj" />
   </ItemGroup>
 
 </Project>
