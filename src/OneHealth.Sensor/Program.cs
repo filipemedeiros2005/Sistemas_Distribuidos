@@ -33,14 +33,27 @@ try
         Console.WriteLine("\n[SHUTDOWN] Ctrl+C received, stopping...");
     };
 
+    // SIGTERM handler — fires when the process is killed without a TTY
+    // (kill_all.sh, systemd, docker stop, etc.). CancelKeyPress would not
+    // catch these. PosixSignalRegistration is .NET 6+ cross-platform.
+    using var sigterm = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+        System.Runtime.InteropServices.PosixSignal.SIGTERM,
+        ctx =>
+        {
+            ctx.Cancel = true;       // prevent the default abrupt termination
+            cts.Cancel();
+            Console.WriteLine("\n[SHUTDOWN] SIGTERM received, stopping...");
+        });
+
     // HELLO — announces the sensor is alive. Payload value is unused.
     await publisher.PublishAsync(BuildEnvelopePacket(options.SensorId, MsgType.Hello));
     Console.WriteLine("[PUB ] HELLO sent.");
 
-    // Start the heartbeat in the background. 5s for the smoke test so we see
-    // several beats during the ~25s cycle; will move to 30s in checkpoint 2.J.
+    // Start the heartbeat in the background. 30s in production keeps the
+    // watchdog signal frequent enough to detect a stalled sensor without
+    // flooding the broker.
     var heartbeat = new HeartbeatTimer(
-        publisher, options.SensorId, TimeSpan.FromSeconds(5));
+        publisher, options.SensorId, TimeSpan.FromSeconds(30));
     var heartbeatTask = heartbeat.RunAsync(cts.Token);
 
     var count = 0;
@@ -65,9 +78,6 @@ try
 
             Console.WriteLine(
                 $"[PUB #{count:D4}] {msgType,-5} {reading.DataType,-6} = {reading.Value,9:F2}   (delay {reading.DelayMs,4}ms)");
-
-            // Smoke-test cap; removed in checkpoint 2.J when sensor runs indefinitely.
-            if (count >= 30) { cts.Cancel(); break; }
         }
     }
     catch (OperationCanceledException) { /* expected */ }
