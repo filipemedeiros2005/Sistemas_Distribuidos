@@ -2,7 +2,72 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="560"
         x:Class="OneHealth.Dashboard.MainWindow"
-        Title="OneHealth.Dashboard">
+        Title="OneHealth Dashboard"
+        Width="900" Height="560">
+
+    <TabControl Margin="8">
+
+        <!-- Telemetry tab — placeholder. Live data lands here on Day 6. -->
+        <TabItem Header="Telemetry">
+            <Border Padding="24">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Live telemetry"
+                               FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock Text="Coming on Day 6 — this tab will show the latest measurements published to the aggregated exchange and persisted in PostgreSQL."
+                               TextWrapping="Wrap" Opacity="0.7" />
+                </StackPanel>
+            </Border>
+        </TabItem>
+
+        <!-- Analysis tab — Day 4 mini-spike. Submits a request to the     -->
+        <!-- Server's AnalysisCoordinator (tcp://127.0.0.1:5006) and       -->
+        <!-- echoes the response into the read-only response box.          -->
+        <TabItem Header="Analysis">
+            <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,*"
+                  ColumnDefinitions="Auto,*">
+
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="Zone:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="0" Grid.Column="1"
+                          Name="CmbZone" Margin="0,0,0,4"
+                          SelectedIndex="0">
+                    <ComboBoxItem>(all)</ComboBoxItem>
+                    <ComboBoxItem>ZONE_NORTH</ComboBoxItem>
+                    <ComboBoxItem>ZONE_SOUTH</ComboBoxItem>
+                </ComboBox>
+
+                <TextBlock Grid.Row="1" Grid.Column="0"
+                           Text="Kind:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="1" Grid.Column="1"
+                          Name="CmbKind" Margin="0,0,0,4"
+                          SelectedIndex="0">
+                    <ComboBoxItem>AVG</ComboBoxItem>
+                    <ComboBoxItem>STDDEV</ComboBoxItem>
+                    <ComboBoxItem>ANOMALY_RATE</ComboBoxItem>
+                    <ComboBoxItem>FORECAST</ComboBoxItem>
+                </ComboBox>
+
+                <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                            Orientation="Horizontal" Spacing="8" Margin="0,8,0,8">
+                    <Button Name="BtnPing"        Content="Ping"          Click="OnPingClicked" />
+                    <Button Name="BtnRunAnalysis" Content="Run Analysis"  Click="OnRunAnalysisClicked" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                           Name="LblStatus" Margin="0,4,0,4"
+                           Text="Ready." Opacity="0.7" />
+
+                <TextBox Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                         Name="TxtResponse"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         FontFamily="Menlo, Consolas, monospace"
+                         FontSize="12" />
+            </Grid>
+        </TabItem>
+
+    </TabControl>
 </Window>
