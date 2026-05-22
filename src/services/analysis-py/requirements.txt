@@ -1,0 +1,14 @@
+# Runtime dependencies for the analysis gRPC service.
+# Pinned with `>=` so pip picks wheels compatible with the host Python; if
+# a host has no compatible wheel the failure is immediate and informative.
+
+grpcio>=1.66
+grpcio-tools>=1.66
+psycopg[binary]>=3.2
+pandas>=2.2
+numpy>=2.0
+scikit-learn>=1.5
+
+# Test dependencies are not strictly required at runtime but live here to
+# keep one source of truth for the venv.
+pytest>=8.0
