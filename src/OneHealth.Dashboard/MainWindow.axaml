@@ -2,10 +2,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="560"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="640"
         x:Class="OneHealth.Dashboard.MainWindow"
         Title="OneHealth Dashboard"
-        Width="900" Height="560">
+        Width="900" Height="640">
 
     <TabControl Margin="8">
 
@@ -21,11 +21,11 @@
             </Border>
         </TabItem>
 
-        <!-- Analysis tab — Day 4 mini-spike. Submits a request to the     -->
-        <!-- Server's AnalysisCoordinator (tcp://127.0.0.1:5006) and       -->
-        <!-- echoes the response into the read-only response box.          -->
+        <!-- Analysis tab — submits a request to the Server's                -->
+        <!-- AnalysisCoordinator (tcp://127.0.0.1:5006), which delegates to  -->
+        <!-- the Python service over gRPC, and renders the response.        -->
         <TabItem Header="Analysis">
-            <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,*"
+            <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*"
                   ColumnDefinitions="Auto,*">
 
                 <TextBlock Grid.Row="0" Grid.Column="0"
@@ -49,17 +49,29 @@
                     <ComboBoxItem>FORECAST</ComboBoxItem>
                 </ComboBox>
 
-                <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                <TextBlock Grid.Row="2" Grid.Column="0"
+                           Text="Types:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <TextBox Grid.Row="2" Grid.Column="1"
+                         Name="TxtTypes" Margin="0,0,0,4"
+                         PlaceholderText="optional, comma-separated (e.g. TEMP,HUM)" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0"
+                           Text="Window (min):" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <TextBox Grid.Row="3" Grid.Column="1"
+                         Name="TxtWindow" Margin="0,0,0,4"
+                         Text="60" />
+
+                <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
                             Orientation="Horizontal" Spacing="8" Margin="0,8,0,8">
                     <Button Name="BtnPing"        Content="Ping"          Click="OnPingClicked" />
                     <Button Name="BtnRunAnalysis" Content="Run Analysis"  Click="OnRunAnalysisClicked" />
                 </StackPanel>
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                <TextBlock Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
                            Name="LblStatus" Margin="0,4,0,4"
                            Text="Ready." Opacity="0.7" />
 
-                <TextBox Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                <TextBox Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
                          Name="TxtResponse"
                          IsReadOnly="True"
                          AcceptsReturn="True"
