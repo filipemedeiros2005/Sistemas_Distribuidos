@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using OneHealth.Server.Analysis;
+using OneHealth.Server.Persistence;
 
 namespace OneHealth.Server.Coordinator;
 
@@ -22,12 +23,18 @@ public sealed class AnalysisCoordinator
     private readonly int _port;
     private readonly ZoneResolver _zoneResolver;
     private readonly AnalysisClient _analysisClient;
+    private readonly AnalysisResultWriter _resultWriter;
 
-    public AnalysisCoordinator(int port, ZoneResolver zoneResolver, AnalysisClient analysisClient)
+    public AnalysisCoordinator(
+        int port,
+        ZoneResolver zoneResolver,
+        AnalysisClient analysisClient,
+        AnalysisResultWriter resultWriter)
     {
         _port = port;
         _zoneResolver = zoneResolver;
         _analysisClient = analysisClient;
+        _resultWriter = resultWriter;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -124,9 +131,22 @@ public sealed class AnalysisCoordinator
         if (result is null)
             return "ERROR|reason=analysis_unavailable";
 
-        // Day 5 will format full series; for now, summary + scalar metrics.
+        // Persist the result so the Dashboard can browse the history.
+        // The chart points (series_json) stay in the row but are not echoed
+        // in the response — the Dashboard fetches them lazily by id.
+        long savedId;
+        try
+        {
+            savedId = await _resultWriter.InsertAsync(result, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[COORDINATOR] Persist failed: {ex.Message}");
+            return $"ERROR|reason=persist_failed|detail={ex.Message}";
+        }
+
         var metrics = string.Join(",", result.Metrics.Select(kv => $"{kv.Key}={kv.Value:F4}"));
-        return $"OK|kind={result.Kind}|summary={EscapePipes(result.SummaryText)}|metrics={metrics}";
+        return $"OK|id={savedId}|kind={result.Kind}|summary={EscapePipes(result.SummaryText)}|metrics={metrics}";
     }
 
     private static string EscapePipes(string s) => s.Replace('|', '/');

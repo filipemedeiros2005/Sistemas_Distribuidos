@@ -21,8 +21,12 @@ try
 
     await using var zoneResolver = new ZoneResolver(PgConnectionString());
     using var analysisClient = new AnalysisClient();
+    await using var resultWriter = new AnalysisResultWriter(PgConnectionString());
+    await resultWriter.InitSchemaAsync();
+    Console.WriteLine("[BOOT] 'analysis_results' table ready.");
+
     var coordinator = new AnalysisCoordinator(
-        AnalysisCoordinator.DefaultPort, zoneResolver, analysisClient);
+        AnalysisCoordinator.DefaultPort, zoneResolver, analysisClient, resultWriter);
     Console.WriteLine("[BOOT] AnalysisCoordinator wired (Python client at http://localhost:50052).");
 
     using var cts = new CancellationTokenSource();
