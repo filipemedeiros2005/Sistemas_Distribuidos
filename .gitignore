@@ -495,3 +495,5 @@ venv/
 # IDE local user settings
 .idea/
 *.user
+erl_crash.dump
+erl_crash.dump
