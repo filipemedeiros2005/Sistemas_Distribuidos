@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
@@ -8,28 +9,79 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using LiveChartsCore;
+using LiveChartsCore.Defaults;
+using LiveChartsCore.SkiaSharpView;
+using OneHealth.Dashboard.Data;
 
 namespace OneHealth.Dashboard;
 
 /// <summary>
-/// Analysis tab driver. Builds a pipe-delimited request from the form
-/// controls, sends it over TCP to the Server's AnalysisCoordinator
-/// (127.0.0.1:5006), parses the pipe-delimited response, and renders it in
-/// a human-friendly multi-line layout in the response TextBox.
-///
-/// The live telemetry tab is still a placeholder — populated on Day 6.
+/// Dashboard window. Wires the Analysis form to the Server's
+/// AnalysisCoordinator over TCP, polls PostgreSQL on a 2-second tick to
+/// keep the live Telemetry feed and the analysis-history ListBox fresh,
+/// and renders FORECAST series in LiveCharts2.
 /// </summary>
 public partial class MainWindow : Window
 {
+    // ---- Server location --------------------------------------------------
     private const string ServerHost = "127.0.0.1";
     private const int    ServerPort = 5006;
     private static readonly Encoding Utf8NoBom =
         new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
+    // ---- Bindings used by the XAML ---------------------------------------
+    /// <summary>Series fed to the CartesianChart. Empty for non-FORECAST analyses.</summary>
+    public ObservableCollection<ISeries> ChartSeries { get; } = new();
+
+    /// <summary>Single X axis configured to format Unix-ms ticks as HH:mm:ss.</summary>
+    public Axis[] ChartXAxes { get; } =
+    {
+        new()
+        {
+            Labeler = value => value > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds((long)value)
+                                .ToLocalTime().ToString("HH:mm:ss")
+                : string.Empty,
+            LabelsRotation = 15,
+        }
+    };
+
+    /// <summary>Most recent analyses (refreshed by timer).</summary>
+    public ObservableCollection<AnalysisListItem> HistoryItems { get; } = new();
+
+    /// <summary>Most recent telemetry rows (refreshed by timer).</summary>
+    public ObservableCollection<TelemetryRow> TelemetryRows { get; } = new();
+
+    // ---- Wiring -----------------------------------------------------------
+    private readonly AnalysisRepository _analysisRepo;
+    private readonly TelemetryRepository _telemetryRepo;
+    private readonly DispatcherTimer _timer;
+
+    /// <summary>Marks an id that was just submitted so the next refresh auto-selects it.</summary>
+    private long? _pendingSelectId;
+
     public MainWindow()
     {
         InitializeComponent();
+        DataContext = this;
+
+        var dsn = PgConnectionString();
+        _analysisRepo  = new AnalysisRepository(dsn);
+        _telemetryRepo = new TelemetryRepository(dsn);
+
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _timer.Tick += async (_, _) => await RefreshAllAsync();
+        _timer.Start();
+
+        // First refresh up-front so the UI is populated before the first tick.
+        Dispatcher.UIThread.Post(async () => await RefreshAllAsync(),
+                                 DispatcherPriority.Background);
     }
+
+    // =====================================================================
+    // Analysis form actions
+    // =====================================================================
 
     private async void OnPingClicked(object? sender, RoutedEventArgs e)
     {
@@ -38,23 +90,24 @@ public partial class MainWindow : Window
 
     private async void OnRunAnalysisClicked(object? sender, RoutedEventArgs e)
     {
-        var zone = (CmbZone.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "(all)";
-        var kind = (CmbKind.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "AVG";
+        var zone   = (CmbZone.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "(all)";
+        var kind   = (CmbKind.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "AVG";
         var window = (TxtWindow.Text ?? "60").Trim();
         var types  = (TxtTypes.Text  ?? "").Trim();
 
         var parts = new List<string> { $"KIND={kind}", $"WINDOW={window}" };
-        if (zone != "(all)") parts.Add($"ZONA={zone}");
-        if (types.Length > 0) parts.Add($"TYPES={types}");
+        if (zone != "(all)")    parts.Add($"ZONA={zone}");
+        if (types.Length > 0)   parts.Add($"TYPES={types}");
         if (kind == "FORECAST") parts.Add("HORIZON=10");
 
-        var request = string.Join('|', parts);
-        await DispatchAsync(request);
+        await DispatchAsync(string.Join('|', parts));
     }
 
     /// <summary>
-    /// Single round-trip TCP call to the AnalysisCoordinator. All UI mutation
-    /// happens on the dispatcher thread.
+    /// Round-trip TCP call to the AnalysisCoordinator. On a successful
+    /// <c>OK|id=N|...</c> response we trigger an immediate history refresh
+    /// and auto-select the new row, so the chart updates without an extra
+    /// click. UI mutation always goes through the dispatcher thread.
     /// </summary>
     private async Task DispatchAsync(string request)
     {
@@ -70,31 +123,40 @@ public partial class MainWindow : Window
             await using var stream = client.GetStream();
             using var writer = new StreamWriter(stream, Utf8NoBom)
             {
-                AutoFlush = true,
-                NewLine = "\n"
+                AutoFlush = true, NewLine = "\n"
             };
             using var reader = new StreamReader(stream, Utf8NoBom);
 
             await writer.WriteLineAsync(request);
             var response = await reader.ReadLineAsync() ?? "(empty response)";
 
-            var pretty = PrettyPrintResponse(request, response);
+            // If we got an OK with an id, auto-select that row after refresh.
+            var fields = ParseFields(response);
+            var verb = fields.Count > 0 ? fields[0].Key : "?";
+            if (verb == "OK")
+            {
+                var idField = fields.FirstOrDefault(f =>
+                    string.Equals(f.Key, "id", StringComparison.OrdinalIgnoreCase));
+                if (long.TryParse(idField.Value, out var newId))
+                    _pendingSelectId = newId;
+                await RefreshAllAsync();
+            }
 
-            await Dispatcher.UIThread.InvokeAsync(() => TxtResponse.Text = pretty);
-            SetStatus($"Done ({response.Length} bytes).");
+            SetStatus(verb switch
+            {
+                "OK"    => $"Done — see history below.",
+                "ERROR" => $"Server returned an error: {response}",
+                "PONG"  => response,
+                _       => response,
+            });
         }
         catch (SocketException ex)
         {
-            await Dispatcher.UIThread.InvokeAsync(() =>
-                TxtResponse.Text =
-                    $"Could not reach server at {ServerHost}:{ServerPort}\n{ex.Message}");
-            SetStatus("Connection refused — is the Server up?");
+            SetStatus($"Could not reach server at {ServerHost}:{ServerPort} — {ex.Message}");
         }
         catch (Exception ex)
         {
-            await Dispatcher.UIThread.InvokeAsync(() =>
-                TxtResponse.Text = $"Unexpected error: {ex.GetType().Name}: {ex.Message}");
-            SetStatus("Error — see response box.");
+            SetStatus($"Unexpected error: {ex.GetType().Name}: {ex.Message}");
         }
         finally
         {
@@ -106,54 +168,135 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// Turns the wire payload (e.g.
-    /// <c>OK|kind=AVG|summary=...|metrics=avg=27.25,count=12.0</c>) into a
-    /// multi-line, vertically aligned display. Falls back to the raw payload
-    /// for shapes we don't recognise (forward-compatible).
-    /// </summary>
-    private static string PrettyPrintResponse(string request, string response)
+    // =====================================================================
+    // Refresh tick (history + telemetry)
+    // =====================================================================
+
+    private async Task RefreshAllAsync()
     {
-        var fields = ParseFields(response);
-        if (fields.Count == 0)
-            return $">>> {request}\n<<< {response}";
-
-        var verb = fields[0].Key; // first segment is the verb: OK / ERROR / PONG
-        var rest = fields.Skip(1).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
-
-        var sb = new StringBuilder();
-        sb.Append(">>> ").AppendLine(request);
-        sb.Append("<<< ").AppendLine(verb);
-
-        if (rest.TryGetValue("kind", out var kind))
-            sb.Append("    kind:    ").AppendLine(kind);
-
-        if (rest.TryGetValue("summary", out var summary))
-            sb.Append("    summary: ").AppendLine(summary);
-
-        if (rest.TryGetValue("reason", out var reason))
-            sb.Append("    reason:  ").AppendLine(reason);
-
-        if (rest.TryGetValue("detail", out var detail))
-            sb.Append("    detail:  ").AppendLine(detail);
-
-        if (rest.TryGetValue("metrics", out var metrics) && metrics.Length > 0)
+        try { await RefreshHistoryAsync(); }
+        catch (Exception ex)
         {
-            sb.AppendLine("    metrics:");
-            foreach (var (k, v) in ParseCsvKv(metrics))
-                sb.Append("      ").Append(k).Append(" = ").AppendLine(v);
+            Console.Error.WriteLine($"[DASHBOARD] history refresh failed: {ex.Message}");
+        }
+        try { await RefreshTelemetryAsync(); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DASHBOARD] telemetry refresh failed: {ex.Message}");
+        }
+    }
+
+    private async Task RefreshHistoryAsync()
+    {
+        var rows = await _analysisRepo.ListRecentAsync(20);
+
+        // Flicker fix: remember selection and restore it after rebuild.
+        var previouslySelectedId = (LstHistory.SelectedItem as AnalysisListItem)?.Id;
+        var targetId = _pendingSelectId ?? previouslySelectedId;
+        _pendingSelectId = null;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            HistoryItems.Clear();
+            foreach (var row in rows) HistoryItems.Add(row);
+
+            if (targetId is long id)
+            {
+                var match = HistoryItems.FirstOrDefault(x => x.Id == id);
+                if (match != null) LstHistory.SelectedItem = match;
+            }
+        });
+    }
+
+    private async Task RefreshTelemetryAsync()
+    {
+        var rows = await _telemetryRepo.ListRecentAsync(50);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            TelemetryRows.Clear();
+            foreach (var r in rows) TelemetryRows.Add(r);
+        });
+    }
+
+    // =====================================================================
+    // Lazy-load chart on selection
+    // =====================================================================
+
+    private async void OnHistorySelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (LstHistory.SelectedItem is not AnalysisListItem item) return;
+
+        AnalysisDetail? detail;
+        try
+        {
+            detail = await _analysisRepo.GetByIdAsync(item.Id);
+        }
+        catch (Exception ex)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                TxtDetails.Text = $"Failed to load analysis #{item.Id}: {ex.Message}");
+            return;
         }
 
-        // Surface anything we didn't explicitly handle so the user can still see it.
-        var handled = new HashSet<string>(
-            new[] { "kind", "summary", "reason", "detail", "metrics" },
-            StringComparer.OrdinalIgnoreCase);
-        foreach (var (k, v) in rest)
-            if (!handled.Contains(k))
-                sb.Append("    ").Append(k).Append(": ").AppendLine(v);
+        if (detail is null)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                TxtDetails.Text = $"Analysis #{item.Id} not found.");
+            return;
+        }
 
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            RenderChart(detail);
+            TxtDetails.Text = FormatDetails(detail);
+        });
+    }
+
+    /// <summary>
+    /// Groups series points by their label ("historical", "forecast", …)
+    /// and adds one <see cref="LineSeries{TModel}"/> per group. Empty series
+    /// (AVG, STDDEV, ANOMALY_RATE) leave the chart blank — intentional.
+    /// </summary>
+    private void RenderChart(AnalysisDetail detail)
+    {
+        ChartSeries.Clear();
+        if (detail.Series.Count == 0) return;
+
+        var grouped = detail.Series
+            .GroupBy(p => string.IsNullOrEmpty(p.Label) ? "values" : p.Label)
+            .OrderBy(g => g.Key == "historical" ? 0 : g.Key == "forecast" ? 1 : 2);
+
+        foreach (var group in grouped)
+        {
+            ChartSeries.Add(new LineSeries<ObservablePoint>
+            {
+                Name           = group.Key,
+                Values         = group.Select(p => new ObservablePoint(p.Ts, p.Value)).ToArray(),
+                GeometrySize   = 6,
+                LineSmoothness = 0.2,
+            });
+        }
+    }
+
+    private static string FormatDetails(AnalysisDetail d)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"#{d.Id}  {d.Kind}  ({d.ProducedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss})");
+        sb.AppendLine($"summary: {d.Summary}");
+        if (d.Metrics.Count > 0)
+        {
+            sb.AppendLine("metrics:");
+            foreach (var (k, v) in d.Metrics.OrderBy(kv => kv.Key))
+                sb.AppendLine($"  {k} = {v:G6}");
+        }
+        if (d.Series.Count > 0)
+            sb.AppendLine($"series: {d.Series.Count} point(s) — see chart");
         return sb.ToString().TrimEnd();
     }
+
+    // =====================================================================
+    // Plumbing
+    // =====================================================================
 
     private static List<KeyValuePair<string, string>> ParseFields(string line)
     {
@@ -161,24 +304,17 @@ public partial class MainWindow : Window
         foreach (var raw in line.Split('|', StringSplitOptions.RemoveEmptyEntries))
         {
             var idx = raw.IndexOf('=');
-            if (idx < 0)
-                result.Add(new KeyValuePair<string, string>(raw.Trim(), string.Empty));
-            else
-                result.Add(new KeyValuePair<string, string>(raw[..idx].Trim(), raw[(idx + 1)..].Trim()));
+            result.Add(idx < 0
+                ? new KeyValuePair<string, string>(raw.Trim(), string.Empty)
+                : new KeyValuePair<string, string>(raw[..idx].Trim(), raw[(idx + 1)..].Trim()));
         }
         return result;
     }
 
-    private static IEnumerable<(string Key, string Value)> ParseCsvKv(string csv)
-    {
-        foreach (var token in csv.Split(',', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var idx = token.IndexOf('=');
-            if (idx <= 0) continue;
-            yield return (token[..idx].Trim(), token[(idx + 1)..].Trim());
-        }
-    }
-
     private void SetStatus(string text) =>
         Dispatcher.UIThread.Post(() => LblStatus.Text = text);
+
+    private static string PgConnectionString() =>
+        Environment.GetEnvironmentVariable("ONEHEALTH_PG_CONN_DASHBOARD")
+        ?? $"Host=localhost;Port=5432;Database=onehealth;Username={Environment.UserName}";
 }

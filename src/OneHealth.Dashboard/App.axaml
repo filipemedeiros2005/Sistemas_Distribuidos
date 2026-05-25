@@ -2,9 +2,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="OneHealth.Dashboard.App"
              RequestedThemeVariant="Default">
-             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+    <!-- "Default" follows the OS theme variant. "Dark" or "Light" are the other options. -->
 
     <Application.Styles>
         <FluentTheme />
+        <!-- DataGrid ships in its own package; we need to pull in its style sheet
+             explicitly so the Telemetry tab renders correctly. -->
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
     </Application.Styles>
 </Application>

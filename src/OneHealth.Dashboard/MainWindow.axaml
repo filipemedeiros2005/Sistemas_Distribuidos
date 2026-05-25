@@ -2,28 +2,48 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="640"
+        xmlns:lvc="using:LiveChartsCore.SkiaSharpView.Avalonia"
+        xmlns:local="using:OneHealth.Dashboard"
+        mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
         x:Class="OneHealth.Dashboard.MainWindow"
+        x:DataType="local:MainWindow"
+        x:CompileBindings="False"
         Title="OneHealth Dashboard"
-        Width="900" Height="640">
+        Width="1100" Height="720">
 
     <TabControl Margin="8">
 
-        <!-- Telemetry tab — placeholder. Live data lands here on Day 6. -->
+        <!-- ================================================================ -->
+        <!-- Telemetry tab — live feed of the most recent telemetry rows.     -->
+        <!-- Bound to TelemetryRows, refreshed by a DispatcherTimer every 2s. -->
+        <!-- ================================================================ -->
         <TabItem Header="Telemetry">
-            <Border Padding="24">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Live telemetry"
-                               FontSize="20" FontWeight="SemiBold" />
-                    <TextBlock Text="Coming on Day 6 — this tab will show the latest measurements published to the aggregated exchange and persisted in PostgreSQL."
-                               TextWrapping="Wrap" Opacity="0.7" />
-                </StackPanel>
-            </Border>
+            <DockPanel Margin="16">
+                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8"
+                           FontSize="14" Opacity="0.7"
+                           Text="Most recent 50 measurements persisted in the telemetry table (auto-refresh every 2 s)." />
+                <DataGrid Name="DgTelemetry"
+                          ItemsSource="{Binding TelemetryRows}"
+                          IsReadOnly="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          BorderThickness="0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Time"    Binding="{Binding Timestamp}" Width="160" />
+                        <DataGridTextColumn Header="Sensor"  Binding="{Binding SensorId}"  Width="100" />
+                        <DataGridTextColumn Header="Type"    Binding="{Binding DataType}"  Width="120" />
+                        <DataGridTextColumn Header="Value"   Binding="{Binding Value, StringFormat=F2}" Width="120" />
+                        <DataGridTextColumn Header="Anomaly" Binding="{Binding IsAnomaly}" Width="100" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
         </TabItem>
 
-        <!-- Analysis tab — submits a request to the Server's                -->
-        <!-- AnalysisCoordinator (tcp://127.0.0.1:5006), which delegates to  -->
-        <!-- the Python service over gRPC, and renders the response.        -->
+        <!-- ================================================================ -->
+        <!-- Analysis tab — form on top, history list + chart at the bottom.  -->
+        <!-- Submitting an analysis triggers an immediate history refresh and -->
+        <!-- auto-selects the new row so the chart updates without a click.   -->
+        <!-- ================================================================ -->
         <TabItem Header="Analysis">
             <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*"
                   ColumnDefinitions="Auto,*">
@@ -62,22 +82,43 @@
                          Text="60" />
 
                 <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
-                            Orientation="Horizontal" Spacing="8" Margin="0,8,0,8">
+                            Orientation="Horizontal" Spacing="8" Margin="0,8,0,4">
                     <Button Name="BtnPing"        Content="Ping"          Click="OnPingClicked" />
                     <Button Name="BtnRunAnalysis" Content="Run Analysis"  Click="OnRunAnalysisClicked" />
                 </StackPanel>
 
                 <TextBlock Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
-                           Name="LblStatus" Margin="0,4,0,4"
+                           Name="LblStatus" Margin="0,0,0,8"
                            Text="Ready." Opacity="0.7" />
 
-                <TextBox Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
-                         Name="TxtResponse"
-                         IsReadOnly="True"
-                         AcceptsReturn="True"
-                         TextWrapping="Wrap"
-                         FontFamily="Menlo, Consolas, monospace"
-                         FontSize="12" />
+                <!-- History (left) + chart and details (right) -->
+                <Grid Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
+                      ColumnDefinitions="320,*" Margin="0,4,0,0">
+
+                    <DockPanel Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,4"
+                                   FontWeight="SemiBold" Text="Recent analyses" />
+                        <ListBox Name="LstHistory"
+                                 ItemsSource="{Binding HistoryItems}"
+                                 SelectionChanged="OnHistorySelected"
+                                 FontFamily="Menlo, Consolas, monospace"
+                                 FontSize="12" />
+                    </DockPanel>
+
+                    <Grid Grid.Column="1" RowDefinitions="*,Auto">
+                        <lvc:CartesianChart Grid.Row="0"
+                                            Name="Chart"
+                                            Series="{Binding ChartSeries}"
+                                            XAxes="{Binding ChartXAxes}" />
+                        <TextBox Grid.Row="1" Name="TxtDetails"
+                                 IsReadOnly="True" AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 FontFamily="Menlo, Consolas, monospace" FontSize="12"
+                                 Margin="0,8,0,0" MinHeight="100" MaxHeight="200" />
+                    </Grid>
+
+                </Grid>
+
             </Grid>
         </TabItem>
 
