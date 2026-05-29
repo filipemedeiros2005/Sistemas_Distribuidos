@@ -64,7 +64,7 @@ Five long-lived processes plus the simulated sensors:
 | **Gateway** | C# | subscribes to RabbitMQ; talks to PostgreSQL + Pre-processor | Bound by zone (`zone.<Z>.#`); maintains the `sensors` registry in PostgreSQL; calls the Pre-processor for every `Data` packet (others bypass); republishes accepted packets to the `onehealth.aggregated` exchange. |
 | **Pre-processor** | C# (ASP.NET gRPC) | port `50051` | Stateless: rejects NaN/Inf, converts °F/K → °C, enforces physical bounds per data type, drops timestamps too far in the future, denies unregistered sensors. |
 | **Server** | C# | RabbitMQ; PostgreSQL; TCP `:5006`; gRPC `:50052` | Persists every `aggregated` packet into the `telemetry` table; exposes a TCP `AnalysisCoordinator` for the Dashboard; resolves zones to sensor ids; delegates heavy queries to Python via gRPC. |
-| **Analysis** | Python 3.11 (gRPC) | port `50052` | (Day 5) Reads from PostgreSQL via `pandas.read_sql_query`; supports `AVG`, `STDDEV`, `ANOMALY_RATE`, and `FORECAST` (linear regression). |
+| **Analysis** | Python 3.11+ (gRPC) | port `50052` | Reads from PostgreSQL via psycopg + pandas; supports `AVG`, `STDDEV`, `ANOMALY_RATE`, and `FORECAST` (linear regression via scikit-learn). |
 | **Dashboard** | C# / Avalonia 12 | TCP `:5006` | Tabbed UI: live telemetry table and historical analysis panel. Renders forecast series via LiveCharts2 over SkiaSharp. |
 
 ### Wire formats
@@ -109,7 +109,7 @@ A gateway responsible for the North zone binds with the wildcard
 | RPC | gRPC over HTTP/2 (Grpc.Net 2.66, Google.Protobuf 3.28) | Strict contracts, polyglot (C# ↔ Python) |
 | Persistence | PostgreSQL 18.3 | Trust auth on localhost, JSONB for forecast series |
 | Analysis | Python 3.11 + pandas + scikit-learn | Best-in-class numerical tooling for the Server's heavy queries |
-| Tests | xUnit (C#), pytest (Python) | Parallel runners, theory tests, Day 5+ coverage |
+| Tests | xUnit (C#), pytest (Python) | 23 xUnit cases (packet + pre-processor) and 10 pytest cases (analysis functions) |
 
 ---
 
@@ -146,7 +146,7 @@ Run-time dependencies expected on the host machine:
 - .NET SDK 9.0.305 (pinned in `global.json`)
 - RabbitMQ 4.x + Erlang 28.x
 - PostgreSQL 16+ (development is on 18.3) with trust auth on `localhost`
-- Python 3.11+ (only needed once Day 5 lands)
+- Python 3.11+ (for the analysis service)
 
 Quick macOS install (Day 7 scripts will automate this):
 
@@ -160,30 +160,55 @@ createdb onehealth
 
 ---
 
-## How to run (manual, current state)
+## How to run
 
-The end-to-end pipeline already works without Python. Each process must be
-started in its own terminal, in this order:
+### Automated (recommended)
+
+`scripts/run_all.sh` auto-installs any missing dependencies (via Homebrew),
+builds the solution, and starts the whole stack in the background — the five
+backend services plus the Dashboard. It works from any directory inside the
+repo (it resolves the repo root via git):
+
+```bash
+scripts/run_all.sh
+```
+
+PID files land in `/tmp/onehealth-pids/` and per-service logs in `logs/`.
+Stop everything with an ordered shutdown (sensors first, so each publishes its
+BYE and is marked `OFFLINE` before the gateway closes):
+
+```bash
+scripts/kill_all.sh
+```
+
+Windows equivalents: `scripts/run_all.ps1` / `scripts/kill_all.ps1` (winget).
+
+### Manual (one terminal per service)
+
+Useful to watch each service's logs live. Order matters — each downstream
+service needs the previous one already listening:
 
 ```bash
 # 1. Pre-processor (gRPC server on :50051)
 dotnet run --project src/OneHealth.Preprocessor
 
-# 2. Server (consumes aggregated, listens on TCP :5006)
+# 2. Analysis service (gRPC server on :50052)
+cd src/services/analysis-py && ./setup.sh && source .venv/bin/activate && python server.py
+
+# 3. Server (consumes aggregated, listens on TCP :5006)
 dotnet run --project src/OneHealth.Server
 
-# 3. Gateway for the North zone (port id 5001)
+# 4. Gateway for the North zone (port id 5001)
 dotnet run --project src/OneHealth.Gateway -- 5001
 
-# 4. One or more sensors
+# 5. One or more sensors
 dotnet run --project src/OneHealth.Sensor -- 101 auto
-dotnet run --project src/OneHealth.Sensor -- 102 auto
 
-# 5. Dashboard
+# 6. Dashboard
 dotnet run --project src/OneHealth.Dashboard
 ```
 
-Telemetry will start landing in PostgreSQL almost immediately:
+Telemetry starts landing in PostgreSQL almost immediately:
 
 ```bash
 psql -d onehealth -c "SELECT count(*) FROM telemetry;"
@@ -192,31 +217,22 @@ psql -d onehealth -c "SELECT count(*) FROM telemetry;"
 In the Dashboard:
 
 - **Analysis tab → Ping** validates the TCP coordinator.
-- **Analysis tab → Run Analysis** issues a query; with Python still missing
-  (Day 5), it returns `ERROR|reason=analysis_unavailable` — expected.
-
-When Day 5 ships, the Python service will be started before the Server:
-
-```bash
-cd src/services/analysis-py
-./setup.sh         # creates .venv and generates gRPC stubs
-source .venv/bin/activate
-python server.py
-```
-
-Day 7 will wrap all of this in `scripts/run_all.sh` / `run_all.ps1` with
-automatic dependency detection and installation.
+- **Analysis tab → Run Analysis** issues a query (AVG, STDDEV, ANOMALY_RATE,
+  FORECAST). If the analysis service is down, it returns
+  `ERROR|reason=analysis_unavailable` and the rest of the pipeline keeps running.
 
 ---
 
 ## Tests
 
 ```bash
-dotnet test
+dotnet test                                                  # 23 xUnit cases
+( cd src/services/analysis-py && .venv/bin/python -m pytest ) # 10 pytest cases
 ```
 
-Currently: 23/23 xUnit cases green — covers the binary packet (CRC tampering,
-malformed input, round-trip) and the pre-processor's five validations.
+xUnit covers the binary packet (CRC tampering, malformed input, round-trip)
+and the pre-processor's five validations. pytest covers the pure analysis
+functions (AVG, STDDEV, ANOMALY_RATE, FORECAST) over synthetic DataFrames.
 
 ---
 
@@ -228,9 +244,13 @@ malformed input, round-trip) and the pre-processor's five validations.
 | 2 | Sensor publisher + heartbeat, Pre-processor with 4 validations + tests | ✅ |
 | 3 | Gateway: consumer, gRPC client, sensors registry + auth, aggregated republish | ✅ |
 | 4 | Server: aggregated consumer → PostgreSQL, AnalysisCoordinator (TCP) + Dashboard mini-spike | ✅ |
-| 5 | Python analysis service + Dashboard wires up real responses | ⏳ |
-| 6 | Dashboard polish (LiveCharts on Analysis, DataGrid on Telemetry) + end-to-end smoke test | ⏳ |
-| 7 | `run_all`/`kill_all` with auto-install, cross-platform validation, technical report, submission | ⏳ |
+| 5 | Python analysis service + Dashboard wires up real responses | ✅ |
+| 6 | Dashboard polish (LiveCharts on Analysis, DataGrid on Telemetry) + end-to-end smoke test | ✅ |
+| 7 | `run_all`/`kill_all` with auto-install, cross-platform validation | ✅ |
+
+End-to-end validation (manual, 7 phases A–G — build/tests, ordered startup,
+SQL pipeline checks, Dashboard, failure modes, graceful shutdown, scripts) all
+passing.
 
 ---
 
