@@ -9,7 +9,13 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve the repo root from the script's own location (prefer git, fall back
+# to the parent of scripts/) and cd into it. This makes the script behave
+# identically no matter which directory the terminal was in when it launched.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")"
+cd "$REPO_ROOT"
+
 LOG_DIR="${REPO_ROOT}/logs"
 PID_DIR="/tmp/onehealth-pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
@@ -111,13 +117,15 @@ sleep 3
 start_svc gateway_5001 "${REPO_ROOT}/src/OneHealth.Gateway/bin/Debug/net9.0/OneHealth.Gateway" 5001
 sleep 2
 start_svc sensor_101   "${REPO_ROOT}/src/OneHealth.Sensor/bin/Debug/net9.0/OneHealth.Sensor" 101 auto
+sleep 3
 
-ok "All background services started."
+# Dashboard last: by now the backend is serving, so its window opens against a
+# live system. It is a GUI app but launches fine in the background on macOS;
+# its PID is tracked like the rest, so kill_all.sh tears it down too.
+start_svc dashboard    "${REPO_ROOT}/src/OneHealth.Dashboard/bin/Debug/net9.0/OneHealth.Dashboard"
+
+ok "All services started — the Dashboard window should appear within a few seconds."
 log "PIDs:  $PID_DIR"
 log "Logs:  $LOG_DIR"
 log ""
-log "Launch the Dashboard in the foreground (so its window is interactive):"
-log "  dotnet run --project src/OneHealth.Dashboard"
-log ""
-log "Stop the background services with:"
-log "  ./scripts/kill_all.sh"
+log "Stop everything (including the Dashboard) with kill_all.sh."
