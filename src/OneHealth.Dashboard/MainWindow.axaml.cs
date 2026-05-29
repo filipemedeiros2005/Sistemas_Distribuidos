@@ -12,7 +12,9 @@ using Avalonia.Threading;
 using LiveChartsCore;
 using LiveChartsCore.Defaults;
 using LiveChartsCore.SkiaSharpView;
+using LiveChartsCore.SkiaSharpView.Painting;
 using OneHealth.Dashboard.Data;
+using SkiaSharp;
 
 namespace OneHealth.Dashboard;
 
@@ -60,6 +62,11 @@ public partial class MainWindow : Window
 
     /// <summary>Marks an id that was just submitted so the next refresh auto-selects it.</summary>
     private long? _pendingSelectId;
+
+    /// <summary>Tracks the analysis currently rendered in the chart, so the 2-second
+    /// history refresh — which triggers a spurious SelectionChanged when it rebuilds
+    /// the ListBox — does not re-draw the chart with rotated palette colors.</summary>
+    private long? _renderedAnalysisId;
 
     public MainWindow()
     {
@@ -226,6 +233,11 @@ public partial class MainWindow : Window
     {
         if (LstHistory.SelectedItem is not AnalysisListItem item) return;
 
+        // Skip the round-trip if the selected analysis is already on screen.
+        // RefreshHistoryAsync rebuilds the ListBox every 2 s; without this guard
+        // the chart would be re-drawn (and series colors rotated) on every tick.
+        if (_renderedAnalysisId == item.Id) return;
+
         AnalysisDetail? detail;
         try
         {
@@ -256,10 +268,16 @@ public partial class MainWindow : Window
     /// Groups series points by their label ("historical", "forecast", …)
     /// and adds one <see cref="LineSeries{TModel}"/> per group. Empty series
     /// (AVG, STDDEV, ANOMALY_RATE) leave the chart blank — intentional.
+    ///
+    /// Stroke/fill colors are pinned per label so successive renders are
+    /// deterministic. LiveCharts2's auto-palette would rotate colors each
+    /// time the series collection is cleared, producing a flicker if the
+    /// chart is re-rendered while the user is reading it.
     /// </summary>
     private void RenderChart(AnalysisDetail detail)
     {
         ChartSeries.Clear();
+        _renderedAnalysisId = detail.Id;
         if (detail.Series.Count == 0) return;
 
         var grouped = detail.Series
@@ -268,15 +286,28 @@ public partial class MainWindow : Window
 
         foreach (var group in grouped)
         {
+            var color = ColorFor(group.Key);
             ChartSeries.Add(new LineSeries<ObservablePoint>
             {
                 Name           = group.Key,
                 Values         = group.Select(p => new ObservablePoint(p.Ts, p.Value)).ToArray(),
                 GeometrySize   = 6,
                 LineSmoothness = 0.2,
+                Stroke         = new SolidColorPaint(color, 2),
+                GeometryStroke = new SolidColorPaint(color, 2),
+                GeometryFill   = new SolidColorPaint(color),
+                Fill           = null,
             });
         }
     }
+
+    /// <summary>Deterministic color per series label so re-renders never flicker.</summary>
+    private static SKColor ColorFor(string label) => label switch
+    {
+        "historical" => new SKColor(0xFF, 0xB3, 0x00),  // amber
+        "forecast"   => new SKColor(0x00, 0xB0, 0xFF),  // deep sky blue
+        _            => new SKColor(0x9E, 0x9E, 0x9E),  // grey for unknown labels
+    };
 
     private static string FormatDetails(AnalysisDetail d)
     {
