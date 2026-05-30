@@ -29,6 +29,10 @@ public partial class MainWindow : Window
     // ---- Server location --------------------------------------------------
     private const string ServerHost = "127.0.0.1";
     private const int    ServerPort = 5006;
+
+    // ---- Video stream location (simulated CCTV feed) ----------------------
+    private const string VideoHost = "127.0.0.1";
+    private const int    VideoPort = 9000;
     private static readonly Encoding Utf8NoBom =
         new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
@@ -55,9 +59,13 @@ public partial class MainWindow : Window
     /// <summary>Most recent telemetry rows (refreshed by timer).</summary>
     public ObservableCollection<TelemetryRow> TelemetryRows { get; } = new();
 
+    /// <summary>Sensor registry rows (refreshed by timer).</summary>
+    public ObservableCollection<SensorRow> SensorRows { get; } = new();
+
     // ---- Wiring -----------------------------------------------------------
     private readonly AnalysisRepository _analysisRepo;
     private readonly TelemetryRepository _telemetryRepo;
+    private readonly SensorRepository _sensorRepo;
     private readonly DispatcherTimer _timer;
 
     /// <summary>Marks an id that was just submitted so the next refresh auto-selects it.</summary>
@@ -76,6 +84,7 @@ public partial class MainWindow : Window
         var dsn = PgConnectionString();
         _analysisRepo  = new AnalysisRepository(dsn);
         _telemetryRepo = new TelemetryRepository(dsn);
+        _sensorRepo    = new SensorRepository(dsn);
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _timer.Tick += async (_, _) => await RefreshAllAsync();
@@ -175,6 +184,18 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Opens a live-feed window for the sensor whose "Live" button was clicked.
+    /// The sensor id travels on the button's Tag (set in the DataGrid template).
+    /// </summary>
+    private void OnLiveClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: int sensorId }) return;
+
+        var player = new VideoPlayerWindow((uint)sensorId, VideoHost, VideoPort);
+        player.Show(this);
+    }
+
     // =====================================================================
     // Refresh tick (history + telemetry)
     // =====================================================================
@@ -190,6 +211,11 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[DASHBOARD] telemetry refresh failed: {ex.Message}");
+        }
+        try { await RefreshSensorsAsync(); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DASHBOARD] sensors refresh failed: {ex.Message}");
         }
     }
 
@@ -222,6 +248,16 @@ public partial class MainWindow : Window
         {
             TelemetryRows.Clear();
             foreach (var r in rows) TelemetryRows.Add(r);
+        });
+    }
+
+    private async Task RefreshSensorsAsync()
+    {
+        var rows = await _sensorRepo.ListAllAsync();
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            SensorRows.Clear();
+            foreach (var r in rows) SensorRows.Add(r);
         });
     }
 

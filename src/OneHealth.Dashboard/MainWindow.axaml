@@ -40,6 +40,42 @@
         </TabItem>
 
         <!-- ================================================================ -->
+        <!-- Sensors tab — the registry the Gateway keeps in PostgreSQL,      -->
+        <!-- showing which sensors are online/offline. Refreshed every 2 s.   -->
+        <!-- ================================================================ -->
+        <TabItem Header="Sensors">
+            <DockPanel Margin="16">
+                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8"
+                           FontSize="14" Opacity="0.7"
+                           Text="Sensor registry (auto-refresh every 2 s). Status reflects the latest Hello/Status/Bye seen by the gateway." />
+                <DataGrid Name="DgSensors"
+                          ItemsSource="{Binding SensorRows}"
+                          IsReadOnly="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          BorderThickness="0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Sensor"    Binding="{Binding SensorId}"     Width="120" />
+                        <DataGridTextColumn Header="Zone"      Binding="{Binding Zone}"         Width="160" />
+                        <DataGridTextColumn Header="Status"    Binding="{Binding Status}"       Width="120" />
+                        <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeenText}" Width="220" />
+                        <DataGridTemplateColumn Header="Live feed" Width="120">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Button Content="Live"
+                                            Margin="4,2"
+                                            IsVisible="{Binding IsOnline}"
+                                            Click="OnLiveClicked"
+                                            Tag="{Binding SensorId}" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </TabItem>
+
+        <!-- ================================================================ -->
         <!-- Analysis tab — form on top, history list + chart at the bottom.  -->
         <!-- Submitting an analysis triggers an immediate history refresh and -->
         <!-- auto-selects the new row so the chart updates without a click.   -->
