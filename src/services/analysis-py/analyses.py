@@ -72,6 +72,12 @@ def compute_forecast(df, horizon: int = 10) -> dict:
     into the future at the average historical spacing. Returns both the
     historical and forecast points in the ``series`` field so the Dashboard
     can render them as a single chart with two visually distinct labels.
+
+    The regression is fitted on normal readings only — rows flagged
+    ``is_anomaly`` are outliers (the simulated alert spikes) that would drag
+    the trend line away from the baseline behaviour. The historical series,
+    however, still includes every point so the chart reflects what actually
+    happened; only the projected (forecast) line ignores the spikes.
     """
     n = len(df)
     if n < 2:
@@ -80,29 +86,36 @@ def compute_forecast(df, horizon: int = 10) -> dict:
             'metrics': {},
         }
 
-    X = df['unix_ts'].to_numpy().reshape(-1, 1).astype(float)
-    y = df['value'].to_numpy().astype(float)
+    # All points are shown; the fit uses only the non-anomalous ones (with a
+    # safe fallback to everything if there aren't at least two normal rows).
+    X_all = df['unix_ts'].to_numpy().reshape(-1, 1).astype(float)
+    y_all = df['value'].to_numpy().astype(float)
+
+    normal = df[~df['is_anomaly'].astype(bool)]
+    fit_df = normal if len(normal) >= 2 else df
+    X_fit = fit_df['unix_ts'].to_numpy().reshape(-1, 1).astype(float)
+    y_fit = fit_df['value'].to_numpy().astype(float)
 
     model = LinearRegression()
-    model.fit(X, y)
+    model.fit(X_fit, y_fit)
 
-    # Step = average spacing of the input series; fall back to 1 minute.
-    step = float((X[-1, 0] - X[0, 0]) / (n - 1)) if n > 1 else 60_000.0
+    # Step = average spacing of the full series; fall back to 1 minute.
+    step = float((X_all[-1, 0] - X_all[0, 0]) / (n - 1)) if n > 1 else 60_000.0
     if step <= 0:
         step = 60_000.0
 
     future_ts = np.array(
-        [X[-1, 0] + step * i for i in range(1, horizon + 1)]
+        [X_all[-1, 0] + step * i for i in range(1, horizon + 1)]
     ).reshape(-1, 1)
     predictions = model.predict(future_ts)
 
-    r2 = float(model.score(X, y))
+    r2 = float(model.score(X_fit, y_fit))
     slope = float(model.coef_[0])
     intercept = float(model.intercept_)
 
     historical = [
         {'ts': int(t), 'value': float(v), 'label': 'historical'}
-        for t, v in zip(X[:, 0], y)
+        for t, v in zip(X_all[:, 0], y_all)
     ]
     forecast = [
         {'ts': int(t), 'value': float(v), 'label': 'forecast'}
@@ -111,8 +124,8 @@ def compute_forecast(df, horizon: int = 10) -> dict:
 
     return {
         'summary': (
-            f"FORECAST: linear, slope={slope:.6g}/ms, "
-            f"R²={r2:.4f}, {horizon} point(s) ahead"
+            f"FORECAST: linear (fit on {len(fit_df)} normal pt(s)), "
+            f"slope={slope:.6g}/ms, R²={r2:.4f}, {horizon} point(s) ahead"
         ),
         'metrics': {
             'slope': slope,

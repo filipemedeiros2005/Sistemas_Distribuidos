@@ -114,6 +114,27 @@ def test_forecast_with_too_few_points():
     assert 'FORECAST needs' in result['summary']
 
 
+def test_forecast_fit_ignores_anomaly_spikes():
+    # 8 flat normal readings at 20, then 2 anomaly spikes at 100. The trend
+    # line must hug the baseline (slope ~0), not be dragged up by the spikes,
+    # while the historical series still shows every point including the spikes.
+    df = _df(
+        values=[20.0] * 8 + [100.0, 100.0],
+        anomalies=[False] * 8 + [True, True],
+    )
+    result = compute_forecast(df, horizon=3)
+
+    assert result['metrics']['slope'] == pytest.approx(0.0, abs=1e-6)
+
+    forecast = [p for p in result['series'] if p['label'] == 'forecast']
+    for p in forecast:
+        assert p['value'] == pytest.approx(20.0, abs=1.0)
+
+    historical = [p for p in result['series'] if p['label'] == 'historical']
+    assert len(historical) == 10
+    assert any(p['value'] == pytest.approx(100.0) for p in historical)
+
+
 # ---- empty input ------------------------------------------------------------
 
 def test_empty_dataframe_returns_safely():
