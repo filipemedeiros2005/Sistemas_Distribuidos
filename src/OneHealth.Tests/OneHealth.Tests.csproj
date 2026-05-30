@@ -21,6 +21,10 @@
   <ItemGroup>
     <ProjectReference Include="..\OneHealth.Common\OneHealth.Common.csproj" />
     <ProjectReference Include="..\OneHealth.Preprocessor\OneHealth.Preprocessor.csproj" />
+    <!-- Aliased: the Gateway re-generates the preprocessing proto types (gRPC
+         client), which would otherwise clash with the Preprocessor's copy
+         (gRPC server) when both are referenced from the test project. -->
+    <ProjectReference Include="..\OneHealth.Gateway\OneHealth.Gateway.csproj" Aliases="gateway" />
   </ItemGroup>
 
 </Project>

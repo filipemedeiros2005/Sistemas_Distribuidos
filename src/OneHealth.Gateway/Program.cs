@@ -18,6 +18,10 @@ try
         $"[BOOT] Gateway port={options.Port} | zones=[{string.Join(", ", options.Zones)}] | " +
         $"sensors={options.AllowedSensors.Count}");
 
+    // Single authorization gate (mutex-guarded) seeded from the CSV allow-list.
+    using var authGuard = new SensorAuthorizationGuard(options.AllowedSensors.Keys);
+    Console.WriteLine($"[BOOT] Authorization guard → {options.AllowedSensors.Count} sensor(s) allowed");
+
     using var preprocessor = new PreprocessorClient();
     Console.WriteLine("[BOOT] Pre-processor client → http://localhost:50051");
 
@@ -57,23 +61,25 @@ try
     {
         recv++;
 
+        // Authorization gate: every packet pulled from the broker is checked
+        // against the CSV allow-list before any further work. Unknown sensors
+        // are acknowledged and silently discarded — no registry write, no RPC,
+        // no republish — so a rogue sensor cannot reach the rest of the system.
+        if (!authGuard.IsAuthorized(packet.SensorId))
+            return ConsumeOutcome.Ack;
+
+        // From here on the sensor is trusted, so its CSV entry always exists.
+        var entry = options.AllowedSensors[packet.SensorId];
+
         // Hello / Status / Bye → refresh the sensor's row in the registry so
-        // the Preprocessor's authorisation check (and any future watchdog)
-        // can rely on a live view of who is alive.
+        // the Dashboard's sensor view has a live picture of who is online.
         if (packet.MsgType is MsgType.Hello or MsgType.Status or MsgType.Bye)
         {
-            if (options.AllowedSensors.TryGetValue(packet.SensorId, out var entry))
+            var newStatus = packet.MsgType == MsgType.Bye ? "OFFLINE" : "ONLINE";
+            try { await registry.UpsertAsync(packet.SensorId, entry.Zone, newStatus, cts.Token); }
+            catch (Exception ex)
             {
-                var newStatus = packet.MsgType == MsgType.Bye ? "OFFLINE" : "ONLINE";
-                try { await registry.UpsertAsync(packet.SensorId, entry.Zone, newStatus, cts.Token); }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"[REGISTRY] UPSERT failed for sid={packet.SensorId}: {ex.Message}");
-                }
-            }
-            else
-            {
-                Console.Error.WriteLine($"[REGISTRY] {packet.MsgType} from unknown sid={packet.SensorId} — skipping UPSERT");
+                Console.Error.WriteLine($"[REGISTRY] UPSERT failed for sid={packet.SensorId}: {ex.Message}");
             }
         }
 
@@ -89,11 +95,9 @@ try
             // the Server can persist + show them on the Dashboard. Hello/Status/Bye
             // are control messages with no measurement value: kept in the registry
             // only, never aggregated.
-            if (packet.MsgType == MsgType.Alert &&
-                options.AllowedSensors.TryGetValue(packet.SensorId, out var alertEntry))
-            {
-                await aggregator.PublishAsync(packet, alertEntry.Zone, cts.Token);
-            }
+            if (packet.MsgType == MsgType.Alert)
+                await aggregator.PublishAsync(packet, entry.Zone, cts.Token);
+
             return ConsumeOutcome.Ack;
         }
 
@@ -113,10 +117,7 @@ try
             // Substitute the value with the canonical/normalised one and
             // re-publish to the aggregated exchange for the Server.
             var normalised = packet with { Value = (float)result.Value };
-            if (options.AllowedSensors.TryGetValue(packet.SensorId, out var entry))
-            {
-                await aggregator.PublishAsync(normalised, entry.Zone, cts.Token);
-            }
+            await aggregator.PublishAsync(normalised, entry.Zone, cts.Token);
 
             fwd++;
             Console.WriteLine(
