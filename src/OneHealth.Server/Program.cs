@@ -4,6 +4,7 @@ using OneHealth.Server.Aggregation;
 using OneHealth.Server.Analysis;
 using OneHealth.Server.Coordinator;
 using OneHealth.Server.Persistence;
+using OneHealth.Server.Video;
 
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 
@@ -29,6 +30,9 @@ try
         AnalysisCoordinator.DefaultPort, zoneResolver, analysisClient, resultWriter);
     Console.WriteLine("[BOOT] AnalysisCoordinator wired (Python client at http://localhost:50052).");
 
+    var videoService = new VideoStreamService();
+    Console.WriteLine($"[BOOT] Video stream service ready (tcp port {VideoStreamService.DefaultPort}).");
+
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) =>
     {
@@ -50,14 +54,16 @@ try
     }, cts.Token);
 
     var coordinatorTask = coordinator.RunAsync(cts.Token);
+    var videoTask = videoService.RunAsync(cts.Token);
 
-    // Whichever finishes first signals shutdown — usually both react to the
+    // Whichever finishes first signals shutdown — usually all react to the
     // cancellation token together when SIGTERM/Ctrl+C lands.
-    await Task.WhenAny(consumerTask, coordinatorTask);
+    await Task.WhenAny(consumerTask, coordinatorTask, videoTask);
     cts.Cancel();
     await Task.WhenAll(
         consumerTask.ContinueWith(_ => { }),
-        coordinatorTask.ContinueWith(_ => { }));
+        coordinatorTask.ContinueWith(_ => { }),
+        videoTask.ContinueWith(_ => { }));
 
     Console.WriteLine($"[SHUTDOWN] Persisted {count} measurements. Goodbye.");
 }
