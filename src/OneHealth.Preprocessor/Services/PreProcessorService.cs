@@ -1,7 +1,5 @@
-using Microsoft.Extensions.DependencyInjection;
 using Grpc.Core;
 using OneHealth.Grpc.Preprocessing;
-using OneHealth.Preprocessor.Authorization;
 
 namespace OneHealth.Preprocessor.Services;
 
@@ -10,37 +8,16 @@ namespace OneHealth.Preprocessor.Services;
 /// on behalf of a Gateway. Stateless and idempotent: the same input always
 /// produces the same output, regardless of call order or concurrency.
 ///
-/// Applied checks, in order:
+/// Sensor authorization is handled upstream by the Gateway (CSV allow-list),
+/// so this service only deals with the data quality of an already-trusted
+/// sensor. Applied checks, in order:
 ///   1. NaN / Infinity rejection (drop with reason "nan_or_inf")
 ///   2. Temperature unit normalization to °C (from "F" or "K" hints)
 ///   3. Physical bounds per data type (drop "out_of_bounds:&lt;TYPE&gt;")
 ///   4. Temporal sanity — timestamp not too far in the future ("future_timestamp")
-///   5. Sensor authorization — sensor id must be registered in the
-///      <c>sensors</c> table populated by the Gateway. Skipped if no
-///      <see cref="SensorAuthorizationCache"/> is configured (unit tests).
 /// </summary>
 public class PreProcessorService : PreProcessor.PreProcessorBase
 {
-    private readonly SensorAuthorizationCache? _authCache;
-
-    /// <summary>
-    /// Production constructor — enforces authorization via the cache.
-    /// Marked with <see cref="ActivatorUtilitiesConstructorAttribute"/> so
-    /// ASP.NET Core's DI picks this overload over the parameterless one
-    /// (the latter exists only for unit tests).
-    /// </summary>
-    [ActivatorUtilitiesConstructor]
-    public PreProcessorService(SensorAuthorizationCache authCache)
-    {
-        _authCache = authCache;
-    }
-
-    /// <summary>Test constructor — authorization check is skipped.</summary>
-    public PreProcessorService()
-    {
-        _authCache = null;
-    }
-
     /// <summary>
     /// Inclusive (min, max) ranges per canonical data-type name.
     /// Values converted to the canonical unit (°C for TEMP) are compared
@@ -96,12 +73,6 @@ public class PreProcessorService : PreProcessor.PreProcessorBase
         var nowMs = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (request.UnixTs > nowMs + FutureToleranceMs)
             return Task.FromResult(Drop(request, "future_timestamp"));
-
-        // 5. Sensor authorization — only sensors registered by the Gateway
-        // (via Hello/Status) are allowed through. Skipped in tests where no
-        // cache is configured.
-        if (_authCache is not null && !_authCache.IsAuthorized(request.SensorId))
-            return Task.FromResult(Drop(request, "unauthorized_sensor"));
 
         return Task.FromResult(new NormalizedMeasurement
         {
