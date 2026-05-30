@@ -38,7 +38,7 @@ Five long-lived processes plus the simulated sensors:
                                               ┌──────────────────────┐
                                               │ Pre-processor (C#)   │
                                               │ ASP.NET gRPC         │
-                                              │ 5 validations        │
+                                              │ 4 validations        │
                                               └──────────────────────┘
                                                     │
         ┌────────────── RabbitMQ exchange onehealth.aggregated ──────┘
@@ -61,8 +61,8 @@ Five long-lived processes plus the simulated sensors:
 | Process | Language | Listens / Connects to | Responsibility |
 |---|---|---|---|
 | **Sensor** | C# | publishes to RabbitMQ | Reads simulated readings from a CSV file at real-time pace, classifies each as `Data` or `Alert`, publishes to `onehealth.telemetry` with a topology-aware routing key, emits `Status` heartbeats every 30 s. |
-| **Gateway** | C# | subscribes to RabbitMQ; talks to PostgreSQL + Pre-processor | Bound by zone (`zone.<Z>.#`); maintains the `sensors` registry in PostgreSQL; calls the Pre-processor for every `Data` packet (others bypass); republishes accepted packets to the `onehealth.aggregated` exchange. |
-| **Pre-processor** | C# (ASP.NET gRPC) | port `50051` | Stateless: rejects NaN/Inf, converts °F/K → °C, enforces physical bounds per data type, drops timestamps too far in the future, denies unregistered sensors. |
+| **Gateway** | C# | subscribes to RabbitMQ; talks to PostgreSQL + Pre-processor | Bound by zone (`zone.<Z>.#`); authorizes every packet against its CSV allow-list (mutex-guarded) before anything else; maintains the `sensors` registry in PostgreSQL; calls the Pre-processor for every `Data` packet (others bypass); republishes accepted packets to the `onehealth.aggregated` exchange. |
+| **Pre-processor** | C# (ASP.NET gRPC) | port `50051` | Stateless: rejects NaN/Inf, converts °F/K → °C, enforces physical bounds per data type, drops timestamps too far in the future. Sensor authorization happens upstream in the Gateway. |
 | **Server** | C# | RabbitMQ; PostgreSQL; TCP `:5006`; gRPC `:50052` | Persists every `aggregated` packet into the `telemetry` table; exposes a TCP `AnalysisCoordinator` for the Dashboard; resolves zones to sensor ids; delegates heavy queries to Python via gRPC. |
 | **Analysis** | Python 3.11+ (gRPC) | port `50052` | Reads from PostgreSQL via psycopg + pandas; supports `AVG`, `STDDEV`, `ANOMALY_RATE`, and `FORECAST` (linear regression via scikit-learn). |
 | **Dashboard** | C# / Avalonia 12 | TCP `:5006` | Tabbed UI: live telemetry table and historical analysis panel. Renders forecast series via LiveCharts2 over SkiaSharp. |
@@ -128,7 +128,7 @@ RepositorioProjetos/
     ├── OneHealth.Common/         — TelemetryPacket, CRC16, enums, schemas
     ├── OneHealth.Sensor/         — CSV reader, classifier, publisher, heartbeat
     ├── OneHealth.Gateway/        — consumer, gRPC client, registry, aggregator
-    ├── OneHealth.Preprocessor/   — ASP.NET gRPC service (5 validations)
+    ├── OneHealth.Preprocessor/   — ASP.NET gRPC service (4 validations)
     ├── OneHealth.Server/         — aggregated consumer, persistence, TCP coordinator
     ├── OneHealth.Dashboard/      — Avalonia desktop app
     ├── OneHealth.Tests/          — xUnit test suite
@@ -226,13 +226,15 @@ In the Dashboard:
 ## Tests
 
 ```bash
-dotnet test                                                  # 23 xUnit cases
+dotnet test                                                  # 27 xUnit cases
 ( cd src/services/analysis-py && .venv/bin/python -m pytest ) # 10 pytest cases
 ```
 
-xUnit covers the binary packet (CRC tampering, malformed input, round-trip)
-and the pre-processor's five validations. pytest covers the pure analysis
-functions (AVG, STDDEV, ANOMALY_RATE, FORECAST) over synthetic DataFrames.
+xUnit covers the binary packet (CRC tampering, malformed input, round-trip),
+the pre-processor's four validations, and the gateway's authorization guard
+(including a concurrent-access stress test of its mutex). pytest covers the
+pure analysis functions (AVG, STDDEV, ANOMALY_RATE, FORECAST) over synthetic
+DataFrames.
 
 ---
 

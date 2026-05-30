@@ -29,7 +29,7 @@ createdb onehealth
 # Compilar a solução .NET inteira (7 projetos):
 dotnet build
 
-# Correr os 23 testes xUnit (packet binário + 5 validações do pre-processor):
+# Correr os 27 testes xUnit (packet binário + 4 validações + guard de autorização):
 dotnet test --nologo
 
 # Correr os 10 testes pytest do serviço de análise Python (subshell isolado):
@@ -117,7 +117,10 @@ dotnet run --project src/OneHealth.Preprocessor
 
 # 7.3 — Sensor não autorizado (rogue 999): arrancar num terminal novo.
 dotnet run --project src/OneHealth.Sensor -- 999 auto
-#       No Gateway: "[REGISTRY] ... unknown sid=999" + "[DROP ...] reason=unauthorized_sensor".
+#       O gateway valida o ID contra a allow-list do CSV (gw_<porta>.csv) logo
+#       ao consumir do broker. Como 999 não está na lista, os pacotes são
+#       descartados em silêncio (ack, sem RPC, sem republish) — não há linha
+#       [DROP] nem [REGISTRY] (esse era o comportamento antigo no pre-processor).
 #       Provar que NADA do 999 foi persistido:
 psql -d onehealth -c "SELECT count(*) FROM telemetry WHERE sensor_id = 999;"   -- esperado: 0
 psql -d onehealth -c "SELECT * FROM sensors WHERE sensor_id = 999;"            -- esperado: 0 linhas
