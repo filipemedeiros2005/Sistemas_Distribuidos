@@ -63,9 +63,9 @@ Five long-lived processes plus the simulated sensors:
 | **Sensor** | C# | publishes to RabbitMQ | Reads simulated readings from a CSV file at real-time pace, classifies each as `Data` or `Alert`, publishes to `onehealth.telemetry` with a topology-aware routing key, emits `Status` heartbeats every 30 s. |
 | **Gateway** | C# | subscribes to RabbitMQ; talks to PostgreSQL + Pre-processor | Bound by zone (`zone.<Z>.#`); authorizes every packet against its CSV allow-list (mutex-guarded) before anything else; maintains the `sensors` registry in PostgreSQL; calls the Pre-processor for every `Data` packet (others bypass); republishes accepted packets to the `onehealth.aggregated` exchange. |
 | **Pre-processor** | C# (ASP.NET gRPC) | port `50051` | Stateless: rejects NaN/Inf, converts °F/K → °C, enforces physical bounds per data type, drops timestamps too far in the future. Sensor authorization happens upstream in the Gateway. |
-| **Server** | C# | RabbitMQ; PostgreSQL; TCP `:5006`; gRPC `:50052` | Persists every `aggregated` packet into the `telemetry` table; exposes a TCP `AnalysisCoordinator` for the Dashboard; resolves zones to sensor ids; delegates heavy queries to Python via gRPC. |
-| **Analysis** | Python 3.11+ (gRPC) | port `50052` | Reads from PostgreSQL via psycopg + pandas; supports `AVG`, `STDDEV`, `ANOMALY_RATE`, and `FORECAST` (linear regression via scikit-learn). |
-| **Dashboard** | C# / Avalonia 12 | TCP `:5006` | Tabbed UI: live telemetry table and historical analysis panel. Renders forecast series via LiveCharts2 over SkiaSharp. |
+| **Server** | C# | RabbitMQ; PostgreSQL; TCP `:5006`; gRPC `:50052`; TCP `:9000` | Persists every `aggregated` packet into the `telemetry` table; exposes a TCP `AnalysisCoordinator` for the Dashboard; resolves zones to sensor ids; delegates heavy queries to Python via gRPC; serves a simulated live video feed over raw TCP. |
+| **Analysis** | Python 3.11+ (gRPC) | port `50052` | Reads from PostgreSQL via psycopg + pandas; supports `AVG`, `STDDEV`, `ANOMALY_RATE`, and `FORECAST` (linear regression via scikit-learn, fitted on non-anomalous readings). |
+| **Dashboard** | C# / Avalonia 12 | TCP `:5006`, `:9000` | Tabbed UI: live telemetry table, sensor registry (online/offline), and historical analysis panel. Renders forecast series via LiveCharts2 over SkiaSharp; opens a per-sensor live video window from the Sensors tab. |
 
 ### Wire formats
 
@@ -74,9 +74,12 @@ Five long-lived processes plus the simulated sensors:
   budget is inherited from TP1 and verified by xUnit round-trip tests.
 - **Gateway ↔ Pre-processor:** gRPC over HTTP/2 (`preprocessing.proto`).
 - **Server ↔ Python:** gRPC over HTTP/2 (`analysis.proto`).
-- **Dashboard ↔ Server:** plain-text pipe-delimited over TCP, e.g.
+- **Dashboard ↔ Server (analysis):** plain-text pipe-delimited over TCP, e.g.
   `KIND=AVG|WINDOW=60|ZONA=ZONE_NORTH|TYPES=TEMP`. Response shape:
   `OK|kind=...|summary=...|metrics=...` or `ERROR|reason=...`.
+- **Dashboard ↔ Server (video):** raw TCP on `:9000`. The client sends the
+  4-byte sensor id, then receives a continuous stream of 16×16 grayscale
+  frames (256 bytes each) — a simulated CCTV feed, no codec.
 
 ### Routing keys (RabbitMQ topic exchanges)
 

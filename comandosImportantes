@@ -70,6 +70,16 @@ dotnet run --project src/OneHealth.Sensor -- 101 auto
 # T6 — Dashboard (janela interativa). No modo manual lança-se à parte.
 dotnet run --project src/OneHealth.Dashboard
 
+--- 3C. ABA DE SENSORES + VÍDEO (na Dashboard) ---
+# Aba "Sensors": lista os sensores do registry (ONLINE/OFFLINE, last seen,
+#   auto-refresh 2s). Lê a tabela `sensors` (dados de runtime, não config).
+# Botão "Live" (só aparece se o sensor está ONLINE): abre uma janela com um
+#   feed de vídeo simulado (ruído cinza 16x16) servido pelo Server por TCP
+#   na porta 9000 — demonstra um transporte de streaming separado do pipeline
+#   de telemetria, no espírito do proxy de vídeo de borda do TP1 (era UDP lá).
+# Para ver OFFLINE: matar só o sensor e esperar ~2s.
+kill $(cat /tmp/onehealth-pids/sensor_101.pid)
+
 --- 4. MULTI-ZONA E MULTI-SENSOR (opcional — demonstra escalabilidade) ---
 # Segundo gateway para a zona Sul (porta 5002):
 dotnet run --project src/OneHealth.Gateway -- 5002
