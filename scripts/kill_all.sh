@@ -9,9 +9,8 @@
 #   4. Wait 3 s for AMQP/gRPC channels to close cleanly.
 #   5. SIGKILL any stragglers.
 #
-# Background services managed by brew (rabbitmq, postgresql@18) are left
-# untouched — they're expected to persist across runs. Stop those with:
-#   brew services stop rabbitmq postgresql@18
+# The background brokers (rabbitmq, postgresql@18) are also stopped at the
+# end for a fully clean shutdown. run_all.sh restarts them on the next run.
 
 set -euo pipefail
 shopt -s nullglob   # empty globs expand to nothing instead of literal text
@@ -72,4 +71,9 @@ for f in "$PID_DIR"/*.pid; do
     rm -f "$f"
 done
 
-log "Done. Brew services (rabbitmq, postgresql@18) stay running."
+# Stop the background brokers too, for a fully clean shutdown.
+log "Stopping background services (rabbitmq, postgresql@18)..."
+brew services stop rabbitmq      >/dev/null 2>&1 || true
+brew services stop postgresql@18 >/dev/null 2>&1 || true
+
+log "Done. All OneHealth services and brokers stopped."

@@ -8,10 +8,8 @@
 # helps for in-flight DATA messages: sensors stop first, the gateway
 # keeps draining for 2 s, then everything else stops.
 #
-# Background Windows services (RabbitMQ, postgresql-x64-18) stay running
-# for the next session. Stop those manually with:
-#   Stop-Service RabbitMQ
-#   Stop-Service postgresql-x64-18
+# The background Windows services (RabbitMQ, postgresql-x64-18) are also
+# stopped at the end for a fully clean shutdown. run_all.ps1 restarts them.
 
 $ErrorActionPreference = 'Continue'
 $PidDir = Join-Path $env:TEMP 'onehealth-pids'
@@ -53,4 +51,9 @@ Start-Sleep -Seconds 2
 $restFiles = $pidFiles | Where-Object { $_.BaseName -notlike 'sensor_*' }
 foreach ($f in $restFiles) { Stop-Pid $f }
 
-Log 'Done. Background services (RabbitMQ, postgresql-x64-18) stay running.'
+# Stop the background brokers too, for a fully clean shutdown.
+Log 'Stopping background services (RabbitMQ, postgresql-x64-18)...'
+Stop-Service RabbitMQ          -ErrorAction SilentlyContinue
+Stop-Service postgresql-x64-18 -ErrorAction SilentlyContinue
+
+Log 'Done. All OneHealth services and brokers stopped.'

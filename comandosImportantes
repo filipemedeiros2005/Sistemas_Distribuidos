@@ -8,7 +8,8 @@ bash "$(git rev-parse --show-toplevel)/scripts/kill_all.sh"
 ===============================================================================
 # Sistema: 5 serviços (Sensor, Gateway, Pre-processor, Server, Analysis-Python)
 # + 2 brokers nativos (RabbitMQ, PostgreSQL). Sem Docker — instalação via brew.
-# Topologia: gw 5001 = ZONE_NORTH (sensores 101,102) | gw 5002 = ZONE_SOUTH (103,104)
+# Topologia: gw 5001 = ZONE_NORTH (sensores 101,102,999) | gw 5002 = ZONE_SOUTH (103,104)
+# 999 = sensor manual (terminal): arranca-se à mão, dados inseridos por teclado.
 
 --- 0. RAIZ DO PROJETO (correr primeiro em CADA terminal novo) ---
 # Todos os comandos abaixo assumem que estás na raiz do repositório.
@@ -80,13 +81,18 @@ dotnet run --project src/OneHealth.Dashboard
 # Para ver OFFLINE: matar só o sensor e esperar ~2s.
 kill $(cat /tmp/onehealth-pids/sensor_101.pid)
 
---- 4. MULTI-ZONA E MULTI-SENSOR (opcional — demonstra escalabilidade) ---
-# Segundo gateway para a zona Sul (porta 5002):
-dotnet run --project src/OneHealth.Gateway -- 5002
-
-# Mais sensores autorizados (101/102 no Norte, 103/104 no Sul):
-dotnet run --project src/OneHealth.Sensor -- 102 auto
-dotnet run --project src/OneHealth.Sensor -- 103 auto
+--- 4. SENSOR MANUAL 999 (dados inseridos via terminal) ---
+# O run_all arranca 2 gateways (5001 norte, 5002 sul) e 4 sensores auto
+# (101,102,103,104). O 999 NÃO é auto-arrancado: é o sensor manual.
+# Num terminal NOVO (separado do run_all), arranca o 999 em modo manual:
+dotnet run --project src/OneHealth.Sensor -- 999 manual
+# Depois escreve medições NESSE terminal, formato "<TIPO> <valor>", ex.:
+#   TEMP 25.5   (Data, normal)
+#   TEMP 50     (Alert: acima do limite -> is_anomaly=true)
+#   HUM 60      (Data)
+# Os dados seguem o MESMO caminho dos automáticos: broker -> gateway ->
+# RPC pré-processador -> exchange aggregated -> server -> dashboard.
+# O 999 aparece OFFLINE na aba Sensors até arrancares; depois fica ONLINE.
 
 --- 5. VALIDAÇÃO DO FLUXO VIA PSQL ---
 # Total de medições + nº de anomalias (espera-se ~16% de anomalias):
@@ -136,14 +142,14 @@ psql -d onehealth -c "SELECT count(*) FROM telemetry WHERE sensor_id = 999;"   -
 psql -d onehealth -c "SELECT * FROM sensors WHERE sensor_id = 999;"            -- esperado: 0 linhas
 
 --- 8. ENCERRAMENTO ---
-# Parar todos os serviços de fundo (SIGTERM ordenado: sensores 1.º p/ enviarem BYE):
-./scripts/kill_all.sh
-
-# Confirmar shutdown gracioso (sensor passou a OFFLINE via BYE):
+# Confirmar shutdown gracioso ANTES de matar tudo (sensor a OFFLINE via BYE):
 psql -d onehealth -c "SELECT sensor_id, status, last_seen FROM sensors WHERE sensor_id = 101;"
 
-# (Opcional) Parar também os brokers — normalmente deixam-se a correr:
-# brew services stop rabbitmq postgresql@18
+# Parar TUDO: serviços (SIGTERM ordenado, sensores 1.º p/ BYE) + brokers
+# (rabbitmq e postgresql@18 também são parados, para encerramento limpo).
+./scripts/kill_all.sh
+# NOTA: como o kill_all pára o Postgres, o psql acima deve ser corrido ANTES.
+# O run_all volta a arrancar os brokers no próximo arranque.
 
 --- 9. RESET DE ESTADO (limpar entre demonstrações) ---
 # Esvaziar as 3 tabelas (mantém o schema):

@@ -92,6 +92,20 @@ if (-not (Test-Path $VenvPython)) {
     Pop-Location
 }
 
+# --- 2.5) Guard against a previous instance still holding our ports --------
+# Starting a second stack on top of a live one silently routes data to the old
+# services (and crashes the new ones with "address already in use"). Abort early
+# and tell the user to clean up first.
+$busy = @()
+foreach ($port in 50051, 50052, 5006, 9000) {
+    if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+        $busy += $port
+    }
+}
+if ($busy.Count -gt 0) {
+    Fail "Ports already in use: $($busy -join ', '). A previous OneHealth stack is still running. Stop it first with .\scripts\kill_all.ps1, then re-run."
+}
+
 # --- 3) Build the .NET solution -------------------------------------------
 Log 'Building .NET solution...'
 dotnet build $RepoRoot --nologo -v minimal *> "$LogDir\build.log"
@@ -105,16 +119,24 @@ Start-Svc analysis     $VenvPython @("$AnalysisDir\server.py")
 Start-Sleep 3
 Start-Svc server       "$RepoRoot\src\OneHealth.Server\bin\Debug\net9.0\OneHealth.Server.exe" @()
 Start-Sleep 3
-Start-Svc gateway_5001 "$RepoRoot\src\OneHealth.Gateway\bin\Debug\net9.0\OneHealth.Gateway.exe" @('5001')
-Start-Sleep 2
-Start-Svc sensor_101   "$RepoRoot\src\OneHealth.Sensor\bin\Debug\net9.0\OneHealth.Sensor.exe" @('101', 'auto')
 
-Ok 'All background services started.'
+# Two gateways: 5001 = North zone (101, 102, 999), 5002 = South zone (103, 104).
+Start-Svc gateway_5001 "$RepoRoot\src\OneHealth.Gateway\bin\Debug\net9.0\OneHealth.Gateway.exe" @('5001')
+Start-Svc gateway_5002 "$RepoRoot\src\OneHealth.Gateway\bin\Debug\net9.0\OneHealth.Gateway.exe" @('5002')
+Start-Sleep 2
+
+# Four auto sensors. 999 is NOT started here — it is the manual terminal sensor:
+#   dotnet run --project src\OneHealth.Sensor -- 999 manual
+Start-Svc sensor_101   "$RepoRoot\src\OneHealth.Sensor\bin\Debug\net9.0\OneHealth.Sensor.exe" @('101', 'auto')
+Start-Svc sensor_102   "$RepoRoot\src\OneHealth.Sensor\bin\Debug\net9.0\OneHealth.Sensor.exe" @('102', 'auto')
+Start-Svc sensor_103   "$RepoRoot\src\OneHealth.Sensor\bin\Debug\net9.0\OneHealth.Sensor.exe" @('103', 'auto')
+Start-Svc sensor_104   "$RepoRoot\src\OneHealth.Sensor\bin\Debug\net9.0\OneHealth.Sensor.exe" @('104', 'auto')
+Start-Sleep 3
+
+Start-Svc dashboard    "$RepoRoot\src\OneHealth.Dashboard\bin\Debug\net9.0\OneHealth.Dashboard.exe" @()
+
+Ok 'All services started — the Dashboard window should appear within a few seconds.'
 Log "PIDs:  $PidDir"
 Log "Logs:  $LogDir"
 Log ''
-Log 'Launch the Dashboard in the foreground:'
-Log '  dotnet run --project src\OneHealth.Dashboard'
-Log ''
-Log 'Stop the background services with:'
-Log '  .\scripts\kill_all.ps1'
+Log 'Stop everything (including the Dashboard) with .\scripts\kill_all.ps1'

@@ -95,6 +95,24 @@ if [ ! -d "${ANALYSIS_DIR}/.venv" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 2.5) Guard against a previous instance still holding our ports. Starting a
+# second stack on top of a live one silently routes data to the old services
+# (and crashes the new ones with "address already in use"), which is very
+# confusing to debug. Abort early and tell the user to clean up first.
+# ---------------------------------------------------------------------------
+busy=""
+for port in 50051 50052 5006 9000; do
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        busy="${busy} ${port}"
+    fi
+done
+if [ -n "$busy" ]; then
+    err "Ports already in use:${busy}. A previous OneHealth stack is still running."
+    err "Stop it first:  ./scripts/kill_all.sh   (or close stray terminals), then re-run."
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # 3) Build the .NET solution once (binaries are reused across services)
 # ---------------------------------------------------------------------------
 log "Building .NET solution..."
@@ -114,9 +132,18 @@ start_svc analysis     "${ANALYSIS_DIR}/.venv/bin/python" "${ANALYSIS_DIR}/serve
 sleep 3
 start_svc server       "${REPO_ROOT}/src/OneHealth.Server/bin/Debug/net9.0/OneHealth.Server"
 sleep 3
+# Two gateways: 5001 = North zone (101, 102, 999), 5002 = South zone (103, 104).
 start_svc gateway_5001 "${REPO_ROOT}/src/OneHealth.Gateway/bin/Debug/net9.0/OneHealth.Gateway" 5001
+start_svc gateway_5002 "${REPO_ROOT}/src/OneHealth.Gateway/bin/Debug/net9.0/OneHealth.Gateway" 5002
 sleep 2
+
+# Four auto sensors. 999 is intentionally NOT started here — it is the manual
+# terminal sensor, launched by hand:
+#   dotnet run --project src/OneHealth.Sensor -- 999 manual
 start_svc sensor_101   "${REPO_ROOT}/src/OneHealth.Sensor/bin/Debug/net9.0/OneHealth.Sensor" 101 auto
+start_svc sensor_102   "${REPO_ROOT}/src/OneHealth.Sensor/bin/Debug/net9.0/OneHealth.Sensor" 102 auto
+start_svc sensor_103   "${REPO_ROOT}/src/OneHealth.Sensor/bin/Debug/net9.0/OneHealth.Sensor" 103 auto
+start_svc sensor_104   "${REPO_ROOT}/src/OneHealth.Sensor/bin/Debug/net9.0/OneHealth.Sensor" 104 auto
 sleep 3
 
 # Dashboard last: by now the backend is serving, so its window opens against a
