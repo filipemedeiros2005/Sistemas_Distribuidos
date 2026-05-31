@@ -37,4 +37,15 @@ public static class SensorsSchema
     /// </summary>
     public const string IsSensorAuthorized = @"
         SELECT 1 FROM sensors WHERE sensor_id = $1;";
+
+    /// <summary>
+    /// Pre-registers a known sensor as OFFLINE on gateway boot, so the
+    /// Dashboard's sensor view lists it before it ever connects. Does nothing
+    /// if the row already exists — a sensor that is already ONLINE keeps its
+    /// state and last_seen.
+    /// </summary>
+    public const string PreregisterSensor = @"
+        INSERT INTO sensors (sensor_id, zone, status, last_seen)
+        VALUES ($1, $2, 'OFFLINE', NOW())
+        ON CONFLICT (sensor_id) DO NOTHING;";
 }

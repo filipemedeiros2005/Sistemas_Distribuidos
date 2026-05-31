@@ -27,7 +27,12 @@ try
 
     await using var registry = new SensorRegistry(PgConnectionString());
     await registry.InitSchemaAsync();
-    Console.WriteLine("[BOOT] PostgreSQL connected; 'sensors' table ready.");
+    // Pre-register every allowed sensor as OFFLINE so the Dashboard lists them
+    // before they connect. Existing ONLINE rows are left untouched.
+    foreach (var entry in options.AllowedSensors.Values)
+        await registry.PreregisterAsync(entry.SensorId, entry.Zone);
+    Console.WriteLine(
+        $"[BOOT] PostgreSQL connected; 'sensors' table ready ({options.AllowedSensors.Count} pre-registered).");
 
     await using var aggregator = new AggregatePublisher(options.Port);
     await aggregator.ConnectAsync();

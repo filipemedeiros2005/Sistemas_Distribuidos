@@ -34,6 +34,21 @@ public sealed class SensorRegistry : IAsyncDisposable
     }
 
     /// <summary>
+    /// Pre-registers a sensor as OFFLINE if it is not already in the table.
+    /// Called on gateway boot for every sensor in the allow-list, so the
+    /// Dashboard lists known-but-not-yet-connected sensors. Never downgrades
+    /// a sensor that is already ONLINE.
+    /// </summary>
+    public async Task PreregisterAsync(
+        uint sensorId, string zone, CancellationToken cancellationToken = default)
+    {
+        await using var cmd = _dataSource.CreateCommand(SensorsSchema.PreregisterSensor);
+        cmd.Parameters.AddWithValue((int)sensorId);
+        cmd.Parameters.AddWithValue(zone);
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// INSERTs or UPDATEs the row for <paramref name="sensorId"/>, refreshing
     /// its zone, status, and last_seen timestamp.
     /// </summary>
