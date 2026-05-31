@@ -81,7 +81,7 @@
         <!-- auto-selects the new row so the chart updates without a click.   -->
         <!-- ================================================================ -->
         <TabItem Header="Analysis">
-            <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*"
+            <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"
                   ColumnDefinitions="Auto,*">
 
                 <TextBlock Grid.Row="0" Grid.Column="0"
@@ -117,18 +117,25 @@
                          Name="TxtWindow" Margin="0,0,0,4"
                          Text="60" />
 
-                <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                <TextBlock Grid.Row="4" Grid.Column="0"
+                           Text="Sensor:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="4" Grid.Column="1"
+                          Name="CmbSensor" Margin="0,0,0,4"
+                          ItemsSource="{Binding SensorFilterOptions}"
+                          SelectedIndex="0" />
+
+                <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
                             Orientation="Horizontal" Spacing="8" Margin="0,8,0,4">
                     <Button Name="BtnPing"        Content="Ping"          Click="OnPingClicked" />
                     <Button Name="BtnRunAnalysis" Content="Run Analysis"  Click="OnRunAnalysisClicked" />
                 </StackPanel>
 
-                <TextBlock Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+                <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
                            Name="LblStatus" Margin="0,0,0,8"
                            Text="Ready." Opacity="0.7" />
 
                 <!-- History (left) + chart and details (right) -->
-                <Grid Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
+                <Grid Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
                       ColumnDefinitions="320,*" Margin="0,4,0,0">
 
                     <DockPanel Grid.Column="0" Margin="0,0,12,0">
@@ -145,7 +152,8 @@
                         <lvc:CartesianChart Grid.Row="0"
                                             Name="Chart"
                                             Series="{Binding ChartSeries}"
-                                            XAxes="{Binding ChartXAxes}" />
+                                            XAxes="{Binding ChartXAxes}"
+                                            ZoomMode="X" />
                         <TextBox Grid.Row="1" Name="TxtDetails"
                                  IsReadOnly="True" AcceptsReturn="True"
                                  TextWrapping="Wrap"

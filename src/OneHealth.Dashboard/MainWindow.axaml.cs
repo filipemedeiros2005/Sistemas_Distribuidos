@@ -62,6 +62,11 @@ public partial class MainWindow : Window
     /// <summary>Sensor registry rows (refreshed by timer).</summary>
     public ObservableCollection<SensorRow> SensorRows { get; } = new();
 
+    /// <summary>Options for the Analysis "Sensor" filter: "(all)" plus each known
+    /// sensor id. Grown in place (never cleared) so the user's current selection
+    /// is preserved across the 2-second refresh.</summary>
+    public ObservableCollection<string> SensorFilterOptions { get; } = new() { "(all)" };
+
     // ---- Wiring -----------------------------------------------------------
     private readonly AnalysisRepository _analysisRepo;
     private readonly TelemetryRepository _telemetryRepo;
@@ -110,9 +115,13 @@ public partial class MainWindow : Window
         var kind   = (CmbKind.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "AVG";
         var window = (TxtWindow.Text ?? "60").Trim();
         var types  = (TxtTypes.Text  ?? "").Trim();
+        var sensor = CmbSensor.SelectedItem as string ?? "(all)";
 
         var parts = new List<string> { $"KIND={kind}", $"WINDOW={window}" };
-        if (zone != "(all)")    parts.Add($"ZONA={zone}");
+        // A specific sensor takes precedence over the zone (the server resolves
+        // SENSORS first and only falls back to ZONA when no sensor is given).
+        if (sensor != "(all)")  parts.Add($"SENSORS={sensor}");
+        else if (zone != "(all)") parts.Add($"ZONA={zone}");
         if (types.Length > 0)   parts.Add($"TYPES={types}");
         if (kind == "FORECAST") parts.Add("HORIZON=10");
 
@@ -258,6 +267,15 @@ public partial class MainWindow : Window
         {
             SensorRows.Clear();
             foreach (var r in rows) SensorRows.Add(r);
+
+            // Grow the Analysis sensor-filter options in place: append any id we
+            // haven't seen yet, keeping "(all)" first and the user's selection intact.
+            foreach (var r in rows)
+            {
+                var id = r.SensorId.ToString();
+                if (!SensorFilterOptions.Contains(id))
+                    SensorFilterOptions.Add(id);
+            }
         });
     }
 
