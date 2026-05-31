@@ -14,10 +14,6 @@ try
     Console.WriteLine(
         $"[BOOT] Sensor {options.SensorId} | zone={options.Zone} | mode={options.Mode}");
 
-    var csvPath = ResolveSimulationCsvPath(options.SensorId);
-    Console.WriteLine($"[BOOT] Reading from {csvPath}");
-
-    var reader     = new CsvSimulationReader(csvPath);
     var classifier = new AnomalyClassifier();
 
     await using var publisher = new RabbitMqPublisher(options.Zone, options.SensorId);
@@ -56,10 +52,28 @@ try
         publisher, options.SensorId, TimeSpan.FromSeconds(30));
     var heartbeatTask = heartbeat.RunAsync(cts.Token);
 
+    // Pick the reading source: a CSV replay (auto) or interactive terminal
+    // input (manual). Both yield the same SimulatedReading, so everything
+    // downstream — classification, publishing, the broker, the gateway, the
+    // RPCs, the server and the dashboard — treats them identically.
+    IAsyncEnumerable<SimulatedReading> readings;
+    if (options.Mode == SensorMode.Manual)
+    {
+        Console.WriteLine("[BOOT] Manual mode — type measurements as: <TYPE> <value>");
+        Console.WriteLine($"[BOOT] Allowed types: {string.Join(", ", DataTypeMapping.MeasurementNames)}");
+        readings = ManualReadingSource.ReadLoopAsync(cts.Token);
+    }
+    else
+    {
+        var csvPath = ResolveSimulationCsvPath(options.SensorId);
+        Console.WriteLine($"[BOOT] Auto mode — reading from {csvPath}");
+        readings = new CsvSimulationReader(csvPath).ReadLoopAsync(cts.Token);
+    }
+
     var count = 0;
     try
     {
-        await foreach (var reading in reader.ReadLoopAsync(cts.Token))
+        await foreach (var reading in readings.WithCancellation(cts.Token))
         {
             count++;
             var msgType  = classifier.Classify(reading.DataType, reading.Value);
@@ -77,7 +91,7 @@ try
             await publisher.PublishAsync(packet, cts.Token);
 
             Console.WriteLine(
-                $"[PUB #{count:D4}] {msgType,-5} {reading.DataType,-6} = {reading.Value,9:F2}   (delay {reading.DelayMs,4}ms)");
+                $"[PUB #{count:D4}] {msgType,-5} {reading.DataType,-6} = {reading.Value,9:F2}");
         }
     }
     catch (OperationCanceledException) { /* expected */ }
