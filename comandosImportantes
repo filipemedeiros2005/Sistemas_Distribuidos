@@ -3,7 +3,11 @@
         
 ATALHO: 
 bash "$(git rev-parse --show-toplevel)/scripts/run_all.sh"
-bash "$(git rev-parse --show-toplevel)/scripts/kill_all.sh"
+
+dotnet run --project src/OneHealth.Sensor -- 999 manual
+
+psql -d onehealth -c "SELECT sensor_id, status FROM sensors WHERE sensor_id=101;"
+bash "$(git rev-parse --show-toplevel)/scripts/kill_all.sh"        
         
 ===============================================================================
 # Sistema: 5 serviços (Sensor, Gateway, Pre-processor, Server, Analysis-Python)
