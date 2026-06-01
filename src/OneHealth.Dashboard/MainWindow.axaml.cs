@@ -319,14 +319,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Groups series points by their label ("historical", "forecast", …)
-    /// and adds one <see cref="LineSeries{TModel}"/> per group. Empty series
-    /// (AVG, STDDEV, ANOMALY_RATE) leave the chart blank — intentional.
-    ///
-    /// Stroke/fill colors are pinned per label so successive renders are
-    /// deterministic. LiveCharts2's auto-palette would rotate colors each
-    /// time the series collection is cleared, producing a flicker if the
-    /// chart is re-rendered while the user is reading it.
+    /// Renders one <see cref="LineSeries{TModel}"/> per label in the result.
+    /// Point series ("values", "historical", "normal", "anomaly", "forecast")
+    /// are drawn with markers; reference lines ("average", "mean", "±1 sigma")
+    /// are thin, marker-less, straight lines. Colors are pinned per label so
+    /// successive renders stay deterministic (no palette-rotation flicker).
     /// </summary>
     private void RenderChart(AnalysisDetail detail)
     {
@@ -336,18 +333,20 @@ public partial class MainWindow : Window
 
         var grouped = detail.Series
             .GroupBy(p => string.IsNullOrEmpty(p.Label) ? "values" : p.Label)
-            .OrderBy(g => g.Key == "historical" ? 0 : g.Key == "forecast" ? 1 : 2);
+            .OrderBy(g => SeriesOrder(g.Key));
 
         foreach (var group in grouped)
         {
             var color = ColorFor(group.Key);
+            var isReferenceLine = IsReferenceLine(group.Key);
+
             ChartSeries.Add(new LineSeries<ObservablePoint>
             {
                 Name           = group.Key,
                 Values         = group.Select(p => new ObservablePoint(p.Ts, p.Value)).ToArray(),
-                GeometrySize   = 6,
-                LineSmoothness = 0.2,
-                Stroke         = new SolidColorPaint(color, 2),
+                GeometrySize   = isReferenceLine ? 0 : 6,
+                LineSmoothness = 0,
+                Stroke         = new SolidColorPaint(color, isReferenceLine ? 1.5f : 2f),
                 GeometryStroke = new SolidColorPaint(color, 2),
                 GeometryFill   = new SolidColorPaint(color),
                 Fill           = null,
@@ -355,12 +354,26 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Reference lines render behind the measurement points.</summary>
+    private static int SeriesOrder(string label) => label switch
+    {
+        "values" or "historical" or "normal" => 0,
+        "anomaly" or "forecast"              => 1,
+        _                                    => 2,  // reference lines on top
+    };
+
+    private static bool IsReferenceLine(string label) =>
+        label is "average" or "mean" or "+1 sigma" or "-1 sigma";
+
     /// <summary>Deterministic color per series label so re-renders never flicker.</summary>
     private static SKColor ColorFor(string label) => label switch
     {
-        "historical" => new SKColor(0xFF, 0xB3, 0x00),  // amber
-        "forecast"   => new SKColor(0x00, 0xB0, 0xFF),  // deep sky blue
-        _            => new SKColor(0x9E, 0x9E, 0x9E),  // grey for unknown labels
+        "historical" or "values" or "normal" => new SKColor(0xFF, 0xB3, 0x00), // amber
+        "forecast"                           => new SKColor(0x00, 0xB0, 0xFF), // deep sky blue
+        "anomaly"                            => new SKColor(0xFF, 0x3D, 0x00), // red-orange
+        "average" or "mean"                  => new SKColor(0x00, 0xE5, 0xFF), // cyan line
+        "+1 sigma" or "-1 sigma"             => new SKColor(0x76, 0xFF, 0x03), // green band
+        _                                    => new SKColor(0x9E, 0x9E, 0x9E), // grey fallback
     };
 
     private static string FormatDetails(AnalysisDetail d)

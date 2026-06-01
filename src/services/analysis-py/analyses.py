@@ -21,8 +21,30 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 
 
+def _flat_series(df, value: float, label: str) -> list[dict]:
+    """A horizontal reference line at ``value`` spanning the data's time range,
+    so the Dashboard can draw it alongside the measurement points."""
+    if len(df) == 0:
+        return []
+    t0 = int(df['unix_ts'].iloc[0])
+    t1 = int(df['unix_ts'].iloc[-1])
+    return [
+        {'ts': t0, 'value': value, 'label': label},
+        {'ts': t1, 'value': value, 'label': label},
+    ]
+
+
+def _value_points(df, label: str = 'values') -> list[dict]:
+    """Every measurement as a chart series."""
+    return [
+        {'ts': int(t), 'value': float(v), 'label': label}
+        for t, v in zip(df['unix_ts'], df['value'])
+    ]
+
+
 def compute_avg(df) -> dict:
-    """Mean of the ``value`` column over the whole window."""
+    """Mean of the ``value`` column over the whole window. The chart shows the
+    raw values plus a horizontal line at the average."""
     n = len(df)
     if n == 0:
         return {'summary': 'AVG: no data in window.', 'metrics': {}}
@@ -32,13 +54,15 @@ def compute_avg(df) -> dict:
     return {
         'summary': f"AVG across {n} measurement(s), {len(types)} type(s): {avg:.2f}",
         'metrics': {'avg': avg, 'count': float(n)},
+        'series': _value_points(df) + _flat_series(df, avg, 'average'),
     }
 
 
 def compute_stddev(df) -> dict:
     """
     Population standard deviation (ddof=0) — the window is treated as the
-    whole population, not a sample. Project-wide convention.
+    whole population, not a sample. Project-wide convention. The chart shows
+    the raw values with mean and ±1σ reference lines.
     """
     n = len(df)
     if n == 0:
@@ -49,20 +73,31 @@ def compute_stddev(df) -> dict:
     return {
         'summary': f"STDDEV (ddof=0) across {n} measurements: {std:.2f} (mean {mean:.2f})",
         'metrics': {'stddev': std, 'mean': mean, 'count': float(n)},
+        'series': (
+            _value_points(df)
+            + _flat_series(df, mean, 'mean')
+            + _flat_series(df, mean + std, '+1 sigma')
+            + _flat_series(df, mean - std, '-1 sigma')
+        ),
     }
 
 
 def compute_anomaly_rate(df) -> dict:
-    """Fraction of rows flagged as anomalies by the sensor / preprocessor."""
+    """Fraction of rows flagged as anomalies by the sensor / preprocessor. The
+    chart shows normal points and anomalous points as two distinct series."""
     n = len(df)
     if n == 0:
         return {'summary': 'ANOMALY_RATE: no data in window.', 'metrics': {}}
 
     alerts = int(df['is_anomaly'].sum())
     rate = alerts / n
+
+    mask = df['is_anomaly'].astype(bool)
+    series = _value_points(df[~mask], 'normal') + _value_points(df[mask], 'anomaly')
     return {
         'summary': f"ANOMALY_RATE: {alerts}/{n} = {rate:.4f} ({rate * 100:.2f}%)",
         'metrics': {'rate': rate, 'total_alerts': float(alerts), 'count': float(n)},
+        'series': series,
     }
 
 

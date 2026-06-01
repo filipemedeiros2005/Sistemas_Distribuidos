@@ -76,6 +76,26 @@ def test_anomaly_rate_all_anomalies():
     assert compute_anomaly_rate(df)['metrics']['rate'] == pytest.approx(1.0)
 
 
+# ---- chart series for the scalar analyses -----------------------------------
+
+def test_avg_series_has_values_and_average_line():
+    labels = {p['label'] for p in compute_avg(_df([10.0, 20.0, 30.0]))['series']}
+    assert 'values' in labels
+    assert 'average' in labels
+
+
+def test_stddev_series_has_mean_and_sigma_bands():
+    labels = {p['label'] for p in compute_stddev(_df([10.0, 20.0, 30.0]))['series']}
+    assert {'values', 'mean', '+1 sigma', '-1 sigma'} <= labels
+
+
+def test_anomaly_rate_series_splits_normal_and_anomaly():
+    df = _df([1, 2, 3, 4], anomalies=[False, False, False, True])
+    series = compute_anomaly_rate(df)['series']
+    assert sum(1 for p in series if p['label'] == 'normal')  == 3
+    assert sum(1 for p in series if p['label'] == 'anomaly') == 1
+
+
 # ---- compute_forecast -------------------------------------------------------
 
 def test_forecast_on_a_straight_line_stays_linear():
