@@ -1,4 +1,5 @@
 using Grpc.Core;
+using OneHealth.Common;
 using OneHealth.Grpc.Preprocessing;
 
 namespace OneHealth.Preprocessor.Services;
@@ -19,19 +20,14 @@ namespace OneHealth.Preprocessor.Services;
 public class PreProcessorService : PreProcessor.PreProcessorBase
 {
     /// <summary>
-    /// Inclusive (min, max) ranges per canonical data-type name.
-    /// Values converted to the canonical unit (°C for TEMP) are compared
-    /// against these bounds.
+    /// Physical-plausibility bounds per canonical data-type name. A reading
+    /// outside this (wider) range is treated as corrupt and dropped. Shared
+    /// with the Sensor's anomaly limits via <see cref="MeasurementLimits"/>:
+    /// the Sensor flags values outside the tighter "normal" band; this service
+    /// drops only the truly implausible ones outside the "plausible" band.
     /// </summary>
-    private static readonly Dictionary<string, (double Min, double Max)> Bounds = new()
-    {
-        ["TEMP"]  = (-40.0, 70.0),
-        ["HUM"]   = (0.0, 100.0),
-        ["PM25"]  = (0.0, 1000.0),
-        ["PM10"]  = (0.0, 1000.0),
-        ["NOISE"] = (0.0, 140.0),
-        ["LUM"]   = (0.0, 150_000.0)
-    };
+    private static readonly IReadOnlyDictionary<string, MeasurementLimits.Range> Bounds =
+        MeasurementLimits.Plausible;
 
     /// <summary>Future-timestamp tolerance, accounting for mild clock drift.</summary>
     private const ulong FutureToleranceMs = 60_000; // 1 minute
@@ -62,8 +58,7 @@ public class PreProcessorService : PreProcessor.PreProcessorBase
         }
 
         // 3. Physical bounds.
-        if (Bounds.TryGetValue(dataType, out var range) &&
-            (value < range.Min || value > range.Max))
+        if (Bounds.TryGetValue(dataType, out var range) && !range.Contains(value))
         {
             return Task.FromResult(Drop(request, $"out_of_bounds:{dataType}"));
         }
