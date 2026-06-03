@@ -9,7 +9,16 @@ dashboard for live monitoring and historical analysis.
 
 This branch (`tp2/fase1/DesenvolvimentoProtocolo2`) hosts the second
 deliverable (TP2), rewritten from scratch on top of the binary protocol
-established in TP1. Work-in-progress; the final tag will be `v1.0`.
+established in TP1.
+
+The TP2 requirements are met as follows: **RPC** at two points (Gateway ↔
+pre-processing service, Server ↔ analysis service), **Publish/Subscribe** over
+RabbitMQ between sensors and gateways, **persistence** in PostgreSQL of both
+readings and analysis results, and a **dashboard** that visualizes data and
+triggers parameterized analyses (time window, data type, sensor id). Carried
+over from TP1: concurrent handling with **threads + mutex**, a simulated live
+**video** feed, and CSV-based gateway configuration. The analysis service is
+written in **Python**, satisfying the multi-language bonus.
 
 ---
 
@@ -60,7 +69,7 @@ Five long-lived processes plus the simulated sensors:
 
 | Process | Language | Listens / Connects to | Responsibility |
 |---|---|---|---|
-| **Sensor** | C# | publishes to RabbitMQ | Reads simulated readings from a CSV file at real-time pace, classifies each as `Data` or `Alert`, publishes to `onehealth.telemetry` with a topology-aware routing key, emits `Status` heartbeats every 30 s. |
+| **Sensor** | C# | publishes to RabbitMQ | Reads simulated readings either from a CSV file at real-time pace (`auto`) or typed at the terminal (`manual`), classifies each as `Data` or `Alert`, publishes to `onehealth.telemetry` with a topology-aware routing key, emits `Status` heartbeats every 30 s, and a `Bye` on graceful shutdown. |
 | **Gateway** | C# | subscribes to RabbitMQ; talks to PostgreSQL + Pre-processor | Bound by zone (`zone.<Z>.#`); authorizes every packet against its CSV allow-list (mutex-guarded) before anything else; maintains the `sensors` registry in PostgreSQL; calls the Pre-processor for every `Data` packet (others bypass); republishes accepted packets to the `onehealth.aggregated` exchange. |
 | **Pre-processor** | C# (ASP.NET gRPC) | port `50051` | Stateless: rejects NaN/Inf, converts °F/K → °C, enforces physical bounds per data type, drops timestamps too far in the future. Sensor authorization happens upstream in the Gateway. |
 | **Server** | C# | RabbitMQ; PostgreSQL; TCP `:5006`; gRPC `:50052`; TCP `:9000` | Persists every `aggregated` packet into the `telemetry` table; exposes a TCP `AnalysisCoordinator` for the Dashboard; resolves zones to sensor ids; delegates heavy queries to Python via gRPC; serves a simulated live video feed over raw TCP. |
@@ -112,7 +121,7 @@ A gateway responsible for the North zone binds with the wildcard
 | RPC | gRPC over HTTP/2 (Grpc.Net 2.66, Google.Protobuf 3.28) | Strict contracts, polyglot (C# ↔ Python) |
 | Persistence | PostgreSQL 18.3 | Trust auth on localhost, JSONB for forecast series |
 | Analysis | Python 3.11 + pandas + scikit-learn | Best-in-class numerical tooling for the Server's heavy queries |
-| Tests | xUnit (C#), pytest (Python) | 23 xUnit cases (packet + pre-processor) and 10 pytest cases (analysis functions) |
+| Tests | xUnit (C#), pytest (Python) | 27 xUnit cases (packet, pre-processor, mutex guard) and 14 pytest cases (analysis functions) |
 
 ---
 
@@ -126,18 +135,18 @@ RepositorioProjetos/
 ├── data/
 │   ├── simulation/               — sensor_<id>.csv, one row per measurement
 │   └── gateway_configs/          — gw_<port>.csv, sensors a gateway is authoritative for
-├── scripts/                      — run_all / kill_all (added on Day 7)
+├── scripts/                      — run_all / kill_all (.sh and .ps1)
 └── src/
-    ├── OneHealth.Common/         — TelemetryPacket, CRC16, enums, schemas
-    ├── OneHealth.Sensor/         — CSV reader, classifier, publisher, heartbeat
-    ├── OneHealth.Gateway/        — consumer, gRPC client, registry, aggregator
+    ├── OneHealth.Common/         — TelemetryPacket, CRC16, enums, limits, schemas
+    ├── OneHealth.Sensor/         — CSV/manual reader, classifier, publisher, heartbeat
+    ├── OneHealth.Gateway/        — consumer, gRPC client, registry, auth guard, aggregator
     ├── OneHealth.Preprocessor/   — ASP.NET gRPC service (4 validations)
-    ├── OneHealth.Server/         — aggregated consumer, persistence, TCP coordinator
-    ├── OneHealth.Dashboard/      — Avalonia desktop app
+    ├── OneHealth.Server/         — aggregated consumer, persistence, TCP coordinator, video
+    ├── OneHealth.Dashboard/      — Avalonia desktop app (Telemetry, Sensors, Analysis)
     ├── OneHealth.Tests/          — xUnit test suite
     ├── protos/                   — preprocessing.proto, analysis.proto
     └── services/
-        └── analysis-py/          — Python analysis service (Day 5)
+        └── analysis-py/          — Python analysis service
 ```
 
 ---
@@ -151,7 +160,7 @@ Run-time dependencies expected on the host machine:
 - PostgreSQL 16+ (development is on 18.3) with trust auth on `localhost`
 - Python 3.11+ (for the analysis service)
 
-Quick macOS install (Day 7 scripts will automate this):
+Quick macOS install (the `run_all` script automates this on first run):
 
 ```bash
 brew install --cask dotnet-sdk
@@ -168,9 +177,11 @@ createdb onehealth
 ### Automated (recommended)
 
 `scripts/run_all.sh` auto-installs any missing dependencies (via Homebrew),
-builds the solution, and starts the whole stack in the background — the five
-backend services plus the Dashboard. It works from any directory inside the
-repo (it resolves the repo root via git):
+builds the solution, and starts the whole stack in the background — the
+pre-processor, the Python analysis service, the server, two gateways
+(North/South zones), four auto sensors (101–104), and the Dashboard. It works
+from any directory inside the repo (it resolves the repo root via git) and
+refuses to start if a previous stack is still holding the ports:
 
 ```bash
 scripts/run_all.sh
@@ -201,11 +212,15 @@ cd src/services/analysis-py && ./setup.sh && source .venv/bin/activate && python
 # 3. Server (consumes aggregated, listens on TCP :5006)
 dotnet run --project src/OneHealth.Server
 
-# 4. Gateway for the North zone (port id 5001)
+# 4. Gateways, one per zone (5001 = North, 5002 = South)
 dotnet run --project src/OneHealth.Gateway -- 5001
+dotnet run --project src/OneHealth.Gateway -- 5002
 
-# 5. One or more sensors
+# 5. Auto sensors (read their CSV in a loop)
 dotnet run --project src/OneHealth.Sensor -- 101 auto
+
+# 5b. A manual sensor, typing readings as "<TYPE> <value>" (e.g. TEMP 25.5)
+dotnet run --project src/OneHealth.Sensor -- 999 manual
 
 # 6. Dashboard
 dotnet run --project src/OneHealth.Dashboard
@@ -241,21 +256,24 @@ DataFrames.
 
 ---
 
-## Development status
+## Dashboard
 
-| Day | Theme | Status |
-|---|---|---|
-| 1 | Solution scaffold, `TelemetryPacket`, .proto contracts, LiveCharts2 spike | ✅ |
-| 2 | Sensor publisher + heartbeat, Pre-processor with 4 validations + tests | ✅ |
-| 3 | Gateway: consumer, gRPC client, sensors registry + auth, aggregated republish | ✅ |
-| 4 | Server: aggregated consumer → PostgreSQL, AnalysisCoordinator (TCP) + Dashboard mini-spike | ✅ |
-| 5 | Python analysis service + Dashboard wires up real responses | ✅ |
-| 6 | Dashboard polish (LiveCharts on Analysis, DataGrid on Telemetry) + end-to-end smoke test | ✅ |
-| 7 | `run_all`/`kill_all` with auto-install, cross-platform validation | ✅ |
+Three tabs:
 
-End-to-end validation (manual, 7 phases A–G — build/tests, ordered startup,
-SQL pipeline checks, Dashboard, failure modes, graceful shutdown, scripts) all
-passing.
+- **Telemetry** — the most recent 50 measurements (auto-refresh every 2 s):
+  time, sensor, type, value, anomaly flag.
+- **Sensors** — the registry (online/offline, last seen), with a per-sensor
+  **Live** button that opens the simulated video feed.
+- **Analysis** — runs `AVG`, `STDDEV`, `ANOMALY_RATE` or `FORECAST`, filtered by
+  zone, data type, sensor, and time window. Every analysis renders a chart
+  (value points plus reference lines / forecast / highlighted anomalies) and is
+  persisted to `analysis_results` for browsing in the history list.
+
+## Status
+
+Feature-complete for the TP2 requirements. End-to-end validation (build/tests,
+ordered startup, SQL pipeline checks, Dashboard, failure modes, graceful
+shutdown, automation scripts) all passing.
 
 ---
 
