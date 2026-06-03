@@ -100,8 +100,26 @@ try
             // the Server can persist + show them on the Dashboard. Hello/Status/Bye
             // are control messages with no measurement value: kept in the registry
             // only, never aggregated.
+            //
+            // Alerts bypass the pre-processor RPC (priority path), but a value
+            // can be anomalous AND physically impossible (e.g. PM10 = 1e13 from a
+            // corrupt or manually-typed reading). We still apply a cheap, local
+            // plausibility check here so impossible values never reach the DB —
+            // a legitimate alert (TEMP=45) passes; garbage is dropped.
             if (packet.MsgType == MsgType.Alert)
+            {
+                var typeName = DataTypeMapping.ToName(packet.DataType);
+                if (MeasurementLimits.Plausible.TryGetValue(typeName, out var range) &&
+                    !range.Contains(packet.Value))
+                {
+                    dropped++;
+                    Console.WriteLine(
+                        $"[DROP   #{recv:D4}] {packet.DataType,-11} sid={packet.SensorId,-3} " +
+                        $"raw={packet.Value,9:F2} reason=alert_out_of_bounds:{typeName}");
+                    return ConsumeOutcome.Ack;
+                }
                 await aggregator.PublishAsync(packet, entry.Zone, cts.Token);
+            }
 
             return ConsumeOutcome.Ack;
         }
