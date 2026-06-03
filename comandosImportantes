@@ -1,15 +1,68 @@
 ===============================================================================
         ONEHEALTH (SISTEMAS DISTRIBUÍDOS) - COMANDOS PARA A DEFESA
         
-ATALHO: 
+ATALHO:
+# 1) arrancar tudo (o run_all garante que o PostgreSQL fica ligado)
 bash "$(git rev-parse --show-toplevel)/scripts/run_all.sh"
 
+# 2) (opcional) limpar dados de sessoes anteriores — SO depois do run_all,
+#    porque o kill_all anterior parou o Postgres e um TRUNCATE antes falharia.
+#    Se limpares, reinicia os sensores (kill_all + run_all) para repovoar.
+psql -d onehealth -c "TRUNCATE sensors, telemetry, analysis_results;"
+
+# 3) sensor manual (terminal separado), dados via teclado: "<TIPO> <valor>"
 dotnet run --project src/OneHealth.Sensor -- 999 manual
 
+# 4) ver os sensores registados
 psql -d onehealth -c "SELECT sensor_id, zone, status FROM sensors ORDER BY sensor_id;"
 
-bash "$(git rev-parse --show-toplevel)/scripts/kill_all.sh"        
+# 5) encerrar tudo (servicos + brokers)
+bash "$(git rev-parse --show-toplevel)/scripts/kill_all.sh"
         
+===============================================================================
+
+Comandos SQL para BD PostgreSQL:
+   
+# Dados a serem gravados AO VIVO (corre várias vezes, vês crescer):
+watch -n 1 'psql -d onehealth -c "SELECT count(*) FROM telemetry;"'
+
+# Telemetria por ZONA (JOIN telemetry + sensors) — prova que a zona é recuperável:
+psql -d onehealth -c "
+  SELECT s.zone, t.data_type, count(*), round(avg(t.value)::numeric,2) AS media
+  FROM telemetry t JOIN sensors s ON s.sensor_id = t.sensor_id
+  GROUP BY s.zone, t.data_type ORDER BY s.zone, t.data_type;"
+
+# Só anomalias, com a zona e o sensor:
+psql -d onehealth -c "
+  SELECT s.zone, t.sensor_id, t.data_type, t.value,
+         to_timestamp(t.unix_ts/1000) AS quando
+  FROM telemetry t JOIN sensors s ON s.sensor_id = t.sensor_id
+  WHERE t.is_anomaly = true ORDER BY t.unix_ts DESC LIMIT 15;"
+
+# Taxa de anomalia por sensor:
+psql -d onehealth -c "
+  SELECT sensor_id,
+         count(*) AS total,
+         sum(is_anomaly::int) AS anomalias,
+         round(100.0*sum(is_anomaly::int)/count(*),1) AS pct
+  FROM telemetry GROUP BY sensor_id ORDER BY sensor_id;"
+
+# Histórico de análises guardadas (a 3ª tabela, com JSONB):
+psql -d onehealth -c "
+  SELECT id, kind, summary, produced_at
+  FROM analysis_results ORDER BY produced_at DESC LIMIT 10;"
+
+# Espreitar o JSONB de uma análise (mostra a flexibilidade NoSQL dentro do SQL):
+psql -d onehealth -c "
+  SELECT id, kind, metrics FROM analysis_results
+  WHERE kind='FORECAST' ORDER BY id DESC LIMIT 1;"
+  
+# Query periódica para atualizar o status dos sensores (OFFLINE se não virem dados há 90s), não foi implementada uma solução automática:
+UPDATE sensors SET status='OFFLINE'
+WHERE last_seen < NOW() - INTERVAL '90 seconds';
+
+===============================================================================
+COMANDOS SECUNDÁRIOS:      
 ===============================================================================
 # Sistema: 5 serviços (Sensor, Gateway, Pre-processor, Server, Analysis-Python)
 # + 2 brokers nativos (RabbitMQ, PostgreSQL). Sem Docker — instalação via brew.
