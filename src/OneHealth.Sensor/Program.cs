@@ -27,6 +27,12 @@ try
         e.Cancel = true;
         cts.Cancel();
         Console.WriteLine("\n[SHUTDOWN] Ctrl+C received, stopping...");
+
+        // In manual mode the read loop is blocked inside Console.ReadLine on a
+        // worker thread, which is not interruptible by the cancellation token.
+        // Exit promptly instead of hanging waiting for one last line.
+        if (options.Mode == SensorMode.Manual)
+            Environment.Exit(0);
     };
 
     // SIGTERM handler — fires when the process is killed without a TTY
