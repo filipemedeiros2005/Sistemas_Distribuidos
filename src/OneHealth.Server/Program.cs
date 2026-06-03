@@ -33,6 +33,9 @@ try
     var videoService = new VideoStreamService();
     Console.WriteLine($"[BOOT] Video stream service ready (tcp port {VideoStreamService.DefaultPort}).");
 
+    await using var watchdog = new SensorWatchdog(PgConnectionString());
+    Console.WriteLine($"[BOOT] Sensor watchdog ready (marks OFFLINE after {SensorWatchdog.StaleThresholdSeconds}s without heartbeat).");
+
     using var cts = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) =>
     {
@@ -55,15 +58,17 @@ try
 
     var coordinatorTask = coordinator.RunAsync(cts.Token);
     var videoTask = videoService.RunAsync(cts.Token);
+    var watchdogTask = watchdog.RunAsync(cts.Token);
 
     // Whichever finishes first signals shutdown — usually all react to the
     // cancellation token together when SIGTERM/Ctrl+C lands.
-    await Task.WhenAny(consumerTask, coordinatorTask, videoTask);
+    await Task.WhenAny(consumerTask, coordinatorTask, videoTask, watchdogTask);
     cts.Cancel();
     await Task.WhenAll(
         consumerTask.ContinueWith(_ => { }),
         coordinatorTask.ContinueWith(_ => { }),
-        videoTask.ContinueWith(_ => { }));
+        videoTask.ContinueWith(_ => { }),
+        watchdogTask.ContinueWith(_ => { }));
 
     Console.WriteLine($"[SHUTDOWN] Persisted {count} measurements. Goodbye.");
 }

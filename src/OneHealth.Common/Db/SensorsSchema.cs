@@ -48,4 +48,16 @@ public static class SensorsSchema
         INSERT INTO sensors (sensor_id, zone, status, last_seen)
         VALUES ($1, $2, 'OFFLINE', NOW())
         ON CONFLICT (sensor_id) DO NOTHING;";
+
+    /// <summary>
+    /// Watchdog sweep: marks ONLINE sensors that have not been heard from in
+    /// the given number of seconds ($1) as OFFLINE. A sensor sends a heartbeat
+    /// every 30 s, so a threshold of ~90 s tolerates a couple of missed beats
+    /// before declaring it dead. Returns the rows affected.
+    /// </summary>
+    public const string MarkStaleSensorsOffline = @"
+        UPDATE sensors
+        SET status = 'OFFLINE'
+        WHERE status = 'ONLINE'
+          AND last_seen < NOW() - make_interval(secs => $1);";
 }
