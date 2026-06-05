@@ -1,0 +1,170 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:lvc="using:LiveChartsCore.SkiaSharpView.Avalonia"
+        xmlns:local="using:OneHealth.Dashboard"
+        mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
+        x:Class="OneHealth.Dashboard.MainWindow"
+        x:DataType="local:MainWindow"
+        x:CompileBindings="False"
+        Title="OneHealth Dashboard"
+        Width="1100" Height="720">
+
+    <TabControl Margin="8">
+
+        <!-- ================================================================ -->
+        <!-- Telemetry tab — live feed of the most recent telemetry rows.     -->
+        <!-- Bound to TelemetryRows, refreshed by a DispatcherTimer every 2s. -->
+        <!-- ================================================================ -->
+        <TabItem Header="Telemetry">
+            <DockPanel Margin="16">
+                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8"
+                           FontSize="14" Opacity="0.7"
+                           Text="Most recent 50 measurements persisted in the telemetry table (auto-refresh every 2 s)." />
+                <DataGrid Name="DgTelemetry"
+                          ItemsSource="{Binding TelemetryRows}"
+                          IsReadOnly="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          BorderThickness="0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Time"    Binding="{Binding Timestamp}" Width="160" />
+                        <DataGridTextColumn Header="Sensor"  Binding="{Binding SensorId}"  Width="100" />
+                        <DataGridTextColumn Header="Type"    Binding="{Binding DataType}"  Width="120" />
+                        <DataGridTextColumn Header="Value"   Binding="{Binding Value, StringFormat=F2}" Width="120" />
+                        <DataGridTextColumn Header="Anomaly" Binding="{Binding IsAnomaly}" Width="100" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </TabItem>
+
+        <!-- ================================================================ -->
+        <!-- Sensors tab — the registry the Gateway keeps in PostgreSQL,      -->
+        <!-- showing which sensors are online/offline. Refreshed every 2 s.   -->
+        <!-- ================================================================ -->
+        <TabItem Header="Sensors">
+            <DockPanel Margin="16">
+                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8"
+                           FontSize="14" Opacity="0.7"
+                           Text="Sensor registry (auto-refresh every 2 s). Status reflects the latest Hello/Status/Bye seen by the gateway." />
+                <DataGrid Name="DgSensors"
+                          ItemsSource="{Binding SensorRows}"
+                          IsReadOnly="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          BorderThickness="0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Sensor"    Binding="{Binding SensorId}"     Width="120" />
+                        <DataGridTextColumn Header="Zone"      Binding="{Binding Zone}"         Width="160" />
+                        <DataGridTextColumn Header="Status"    Binding="{Binding Status}"       Width="120" />
+                        <DataGridTextColumn Header="Last seen" Binding="{Binding LastSeenText}" Width="220" />
+                        <DataGridTemplateColumn Header="Live feed" Width="120">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Button Content="Live"
+                                            Margin="4,2"
+                                            IsVisible="{Binding IsOnline}"
+                                            Click="OnLiveClicked"
+                                            Tag="{Binding SensorId}" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </TabItem>
+
+        <!-- ================================================================ -->
+        <!-- Analysis tab — form on top, history list + chart at the bottom.  -->
+        <!-- Submitting an analysis triggers an immediate history refresh and -->
+        <!-- auto-selects the new row so the chart updates without a click.   -->
+        <!-- ================================================================ -->
+        <TabItem Header="Analysis">
+            <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"
+                  ColumnDefinitions="Auto,*">
+
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="Zone:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="0" Grid.Column="1"
+                          Name="CmbZone" Margin="0,0,0,4"
+                          SelectedIndex="0">
+                    <ComboBoxItem>(all)</ComboBoxItem>
+                    <ComboBoxItem>ZONE_NORTH</ComboBoxItem>
+                    <ComboBoxItem>ZONE_SOUTH</ComboBoxItem>
+                </ComboBox>
+
+                <TextBlock Grid.Row="1" Grid.Column="0"
+                           Text="Kind:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="1" Grid.Column="1"
+                          Name="CmbKind" Margin="0,0,0,4"
+                          SelectedIndex="0">
+                    <ComboBoxItem>AVG</ComboBoxItem>
+                    <ComboBoxItem>STDDEV</ComboBoxItem>
+                    <ComboBoxItem>ANOMALY_RATE</ComboBoxItem>
+                    <ComboBoxItem>FORECAST</ComboBoxItem>
+                </ComboBox>
+
+                <TextBlock Grid.Row="2" Grid.Column="0"
+                           Text="Types:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <TextBox Grid.Row="2" Grid.Column="1"
+                         Name="TxtTypes" Margin="0,0,0,4"
+                         PlaceholderText="optional, comma-separated (e.g. TEMP,HUM)" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0"
+                           Text="Window (min):" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <TextBox Grid.Row="3" Grid.Column="1"
+                         Name="TxtWindow" Margin="0,0,0,4"
+                         Text="60" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0"
+                           Text="Sensor:" Margin="0,0,12,4" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="4" Grid.Column="1"
+                          Name="CmbSensor" Margin="0,0,0,4"
+                          ItemsSource="{Binding SensorFilterOptions}"
+                          SelectedIndex="0" />
+
+                <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+                            Orientation="Horizontal" Spacing="8" Margin="0,8,0,4">
+                    <Button Name="BtnPing"        Content="Ping"          Click="OnPingClicked" />
+                    <Button Name="BtnRunAnalysis" Content="Run Analysis"  Click="OnRunAnalysisClicked" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
+                           Name="LblStatus" Margin="0,0,0,8"
+                           Text="Ready." Opacity="0.7" />
+
+                <!-- History (left) + chart and details (right) -->
+                <Grid Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2"
+                      ColumnDefinitions="320,*" Margin="0,4,0,0">
+
+                    <DockPanel Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,4"
+                                   FontWeight="SemiBold" Text="Recent analyses" />
+                        <ListBox Name="LstHistory"
+                                 ItemsSource="{Binding HistoryItems}"
+                                 SelectionChanged="OnHistorySelected"
+                                 FontFamily="Menlo, Consolas, monospace"
+                                 FontSize="12" />
+                    </DockPanel>
+
+                    <Grid Grid.Column="1" RowDefinitions="*,Auto">
+                        <lvc:CartesianChart Grid.Row="0"
+                                            Name="Chart"
+                                            Series="{Binding ChartSeries}"
+                                            XAxes="{Binding ChartXAxes}"
+                                            ZoomMode="X" />
+                        <TextBox Grid.Row="1" Name="TxtDetails"
+                                 IsReadOnly="True" AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 FontFamily="Menlo, Consolas, monospace" FontSize="12"
+                                 Margin="0,8,0,0" MinHeight="100" MaxHeight="200" />
+                    </Grid>
+
+                </Grid>
+
+            </Grid>
+        </TabItem>
+
+    </TabControl>
+</Window>

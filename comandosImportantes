@@ -1,0 +1,222 @@
+===============================================================================
+        ONEHEALTH (SISTEMAS DISTRIBUÍDOS) - COMANDOS PARA A DEFESA
+        
+ATALHO:
+# 1) arrancar tudo (o run_all garante que o PostgreSQL fica ligado)
+bash "$(git rev-parse --show-toplevel)/scripts/run_all.sh"
+
+# 2) (opcional) limpar dados de sessoes anteriores — SO depois do run_all,
+#    porque o kill_all anterior parou o Postgres e um TRUNCATE antes falharia.
+#    Se limpares, reinicia os sensores (kill_all + run_all) para repovoar.
+psql -d onehealth -c "TRUNCATE sensors, telemetry, analysis_results;"
+
+# 3) sensor manual (terminal separado), dados via teclado: "<TIPO> <valor>"
+dotnet run --project src/OneHealth.Sensor -- 999 manual
+
+# 4) ver os sensores registados
+psql -d onehealth -c "SELECT sensor_id, zone, status FROM sensors ORDER BY sensor_id;"
+
+# 5) encerrar tudo (servicos + brokers)
+bash "$(git rev-parse --show-toplevel)/scripts/kill_all.sh"
+        
+===============================================================================
+
+Comandos SQL para BD PostgreSQL:
+   
+# Dados a serem gravados AO VIVO (corre várias vezes, vês crescer):
+watch -n 1 'psql -d onehealth -c "SELECT count(*) FROM telemetry;"'
+
+# Telemetria por ZONA (JOIN telemetry + sensors) — prova que a zona é recuperável:
+psql -d onehealth -c "
+  SELECT s.zone, t.data_type, count(*), round(avg(t.value)::numeric,2) AS media
+  FROM telemetry t JOIN sensors s ON s.sensor_id = t.sensor_id
+  GROUP BY s.zone, t.data_type ORDER BY s.zone, t.data_type;"
+
+# Só anomalias, com a zona e o sensor:
+psql -d onehealth -c "
+  SELECT s.zone, t.sensor_id, t.data_type, t.value,
+         to_timestamp(t.unix_ts/1000) AS quando
+  FROM telemetry t JOIN sensors s ON s.sensor_id = t.sensor_id
+  WHERE t.is_anomaly = true ORDER BY t.unix_ts DESC LIMIT 15;"
+
+# Taxa de anomalia por sensor:
+psql -d onehealth -c "
+  SELECT sensor_id,
+         count(*) AS total,
+         sum(is_anomaly::int) AS anomalias,
+         round(100.0*sum(is_anomaly::int)/count(*),1) AS pct
+  FROM telemetry GROUP BY sensor_id ORDER BY sensor_id;"
+
+# Histórico de análises guardadas (a 3ª tabela, com JSONB):
+psql -d onehealth -c "
+  SELECT id, kind, summary, produced_at
+  FROM analysis_results ORDER BY produced_at DESC LIMIT 10;"
+
+# Espreitar o JSONB de uma análise (mostra a flexibilidade NoSQL dentro do SQL):
+psql -d onehealth -c "
+  SELECT id, kind, metrics FROM analysis_results
+  WHERE kind='FORECAST' ORDER BY id DESC LIMIT 1;"
+  
+# Query periódica para atualizar o status dos sensores (OFFLINE se não virem dados há 90s), não foi implementada uma solução automática:
+UPDATE sensors SET status='OFFLINE'
+WHERE last_seen < NOW() - INTERVAL '90 seconds';
+
+===============================================================================
+COMANDOS SECUNDÁRIOS:      
+===============================================================================
+# Sistema: 5 serviços (Sensor, Gateway, Pre-processor, Server, Analysis-Python)
+# + 2 brokers nativos (RabbitMQ, PostgreSQL). Sem Docker — instalação via brew.
+# Topologia: gw 5001 = ZONE_NORTH (sensores 101,102,999) | gw 5002 = ZONE_SOUTH (103,104)
+# 999 = sensor manual (terminal): arranca-se à mão, dados inseridos por teclado.
+
+--- 0. RAIZ DO PROJETO (correr primeiro em CADA terminal novo) ---
+# Todos os comandos abaixo assumem que estás na raiz do repositório.
+cd "/Users/antonionascimento/Library/CloudStorage/GoogleDrive-af13741@gmail.com/My Drive/Pessoal/Academia/Superior/3A2S/SistemasDistribuidos/RepositorioProjetos"
+
+--- 1. INFRAESTRUTURA (PostgreSQL + RabbitMQ via Homebrew) ---
+# Verificar se os dois serviços de fundo estão ativos:
+brew services list | grep -E "rabbitmq|postgresql"
+
+# Arrancar caso algum esteja "stopped":
+brew services start postgresql@18
+brew services start rabbitmq
+
+# Criar a base de dados (só na primeira vez numa máquina nova):
+createdb onehealth
+
+--- 2. BUILD E TESTES (provar que o código compila e os testes passam) ---
+# Compilar a solução .NET inteira (7 projetos):
+dotnet build
+
+# Correr os 27 testes xUnit (packet binário + 4 validações + guard de autorização):
+dotnet test --nologo
+
+# Correr os 10 testes pytest do serviço de análise Python (subshell isolado):
+( cd src/services/analysis-py && .venv/bin/python -m pytest test_analyses.py )
+
+--- 3A. ARRANQUE AUTOMÁTICO (recomendado p/ defesa — 1 comando) ---
+# Auto-instala dependências em falta, compila e arranca TUDO em fundo:
+# 5 serviços de backend + a Dashboard (a janela abre sozinha após ~5s).
+# Funciona de qualquer pasta dentro do repo (resolve a raiz via git).
+# PIDs ficam em /tmp/onehealth-pids/ ; logs por serviço em ./logs/
+./scripts/run_all.sh
+
+# (a Dashboard já é lançada pelo run_all; só precisas disto se a quiseres
+#  relançar à parte para ver o boot dela no terminal)
+# dotnet run --project src/OneHealth.Dashboard
+
+# Acompanhar um log ao vivo (terminal à parte), p. ex. o gateway:
+tail -f logs/gateway_5001.log
+
+--- 3B. ARRANQUE MANUAL (5 terminais — mostra os logs ao vivo) ---
+# A ORDEM IMPORTA: cada serviço a jusante precisa do anterior já a ouvir.
+
+# T1 — Pre-processor (gRPC :50051). Esperar "Now listening on :50051".
+dotnet run --project src/OneHealth.Preprocessor
+
+# T2 — Análise Python (gRPC :50052). Esperar "gRPC server listening on :50052".
+cd src/services/analysis-py && source .venv/bin/activate && python server.py
+
+# T3 — Server (TCP :5006 + consumer aggregated). Esperar "Listening on tcp://127.0.0.1:5006".
+dotnet run --project src/OneHealth.Server
+
+# T4 — Gateway ZONE_NORTH (porta 5001). Esperar "Connected. Listening for telemetry...".
+dotnet run --project src/OneHealth.Gateway -- 5001
+
+# T5 — Sensor 101 (auto). Esperar "HELLO sent." e o stream de "[PUB #...]".
+dotnet run --project src/OneHealth.Sensor -- 101 auto
+
+# T6 — Dashboard (janela interativa). No modo manual lança-se à parte.
+dotnet run --project src/OneHealth.Dashboard
+
+--- 3C. ABA DE SENSORES + VÍDEO (na Dashboard) ---
+# Aba "Sensors": lista os sensores do registry (ONLINE/OFFLINE, last seen,
+#   auto-refresh 2s). Lê a tabela `sensors` (dados de runtime, não config).
+# Botão "Live" (só aparece se o sensor está ONLINE): abre uma janela com um
+#   feed de vídeo simulado (ruído cinza 16x16) servido pelo Server por TCP
+#   na porta 9000 — demonstra um transporte de streaming separado do pipeline
+#   de telemetria, no espírito do proxy de vídeo de borda do TP1 (era UDP lá).
+# Para ver OFFLINE: matar só o sensor e esperar ~2s.
+kill $(cat /tmp/onehealth-pids/sensor_101.pid)
+
+--- 4. SENSOR MANUAL 999 (dados inseridos via terminal) ---
+# O run_all arranca 2 gateways (5001 norte, 5002 sul) e 4 sensores auto
+# (101,102,103,104). O 999 NÃO é auto-arrancado: é o sensor manual.
+# Num terminal NOVO (separado do run_all), arranca o 999 em modo manual:
+dotnet run --project src/OneHealth.Sensor -- 999 manual
+# Depois escreve medições NESSE terminal, formato "<TIPO> <valor>", ex.:
+#   TEMP 25.5   (Data, normal)
+#   TEMP 50     (Alert: acima do limite -> is_anomaly=true)
+#   HUM 60      (Data)
+# Os dados seguem o MESMO caminho dos automáticos: broker -> gateway ->
+# RPC pré-processador -> exchange aggregated -> server -> dashboard.
+# O 999 aparece OFFLINE na aba Sensors até arrancares; depois fica ONLINE.
+
+--- 5. VALIDAÇÃO DO FLUXO VIA PSQL ---
+# Total de medições + nº de anomalias (espera-se ~16% de anomalias):
+psql -d onehealth -c "SELECT count(*) AS total, sum((is_anomaly)::int) AS anomalies FROM telemetry;"
+
+# Distribuição por tipo de dado (TEMP costuma ser o mais frequente):
+psql -d onehealth -c "SELECT data_type, count(*) FROM telemetry GROUP BY data_type ORDER BY count DESC;"
+
+# Registry de sensores (zona + estado ONLINE/OFFLINE + última atividade):
+psql -d onehealth -c "SELECT sensor_id, zone, status, last_seen FROM sensors ORDER BY sensor_id;"
+
+# Últimas 10 medições inseridas:
+psql -d onehealth -c "SELECT sensor_id, data_type, value, is_anomaly FROM telemetry ORDER BY unix_ts DESC LIMIT 10;"
+
+--- 6. INSPEÇÃO DO RABBITMQ ---
+# Estado do broker:
+/opt/homebrew/opt/rabbitmq/sbin/rabbitmqctl status | head -3
+
+# Exchanges (esperar onehealth.telemetry e onehealth.aggregated, ambos "topic"):
+/opt/homebrew/opt/rabbitmq/sbin/rabbitmqctl list_exchanges name type | grep onehealth
+
+# Filas + nº de mensagens (0 em regime normal, pois os consumers drenam em tempo real):
+/opt/homebrew/opt/rabbitmq/sbin/rabbitmqctl list_queues name messages
+
+# Interface web de gestão (login: guest / guest):
+open http://localhost:15672
+
+--- 7. MODOS DE FALHA (demonstrações de robustez) ---
+# 7.1 — Análise indisponível: matar o Python (Ctrl+C no T2) e correr análise
+#       na Dashboard -> resposta "ERROR|reason=analysis_unavailable". Nada crasha;
+#       a telemetria continua a fluir (degradação graciosa).
+
+# 7.2 — Pre-processor em baixo: matar o T1 (Ctrl+C). O Gateway emite [RETRY ...]
+#       e a fila enche. Confirmar a fila a crescer:
+/opt/homebrew/opt/rabbitmq/sbin/rabbitmqctl list_queues name messages | grep oh.gateway.5001
+#       Re-arrancar o pre-processor -> o backlog é drenado (entrega at-least-once):
+dotnet run --project src/OneHealth.Preprocessor
+
+# 7.3 — Sensor não autorizado (rogue 999): arrancar num terminal novo.
+dotnet run --project src/OneHealth.Sensor -- 999 auto
+#       O gateway valida o ID contra a allow-list do CSV (gw_<porta>.csv) logo
+#       ao consumir do broker. Como 999 não está na lista, os pacotes são
+#       descartados em silêncio (ack, sem RPC, sem republish) — não há linha
+#       [DROP] nem [REGISTRY] (esse era o comportamento antigo no pre-processor).
+#       Provar que NADA do 999 foi persistido:
+psql -d onehealth -c "SELECT count(*) FROM telemetry WHERE sensor_id = 999;"   -- esperado: 0
+psql -d onehealth -c "SELECT * FROM sensors WHERE sensor_id = 999;"            -- esperado: 0 linhas
+
+--- 8. ENCERRAMENTO ---
+# Confirmar shutdown gracioso ANTES de matar tudo (sensor a OFFLINE via BYE):
+psql -d onehealth -c "SELECT sensor_id, status, last_seen FROM sensors WHERE sensor_id = 101;"
+
+# Parar TUDO: serviços (SIGTERM ordenado, sensores 1.º p/ BYE) + brokers
+# (rabbitmq e postgresql@18 também são parados, para encerramento limpo).
+./scripts/kill_all.sh
+# NOTA: como o kill_all pára o Postgres, o psql acima deve ser corrido ANTES.
+# O run_all volta a arrancar os brokers no próximo arranque.
+
+--- 9. RESET DE ESTADO (limpar entre demonstrações) ---
+# Esvaziar as 3 tabelas (mantém o schema):
+psql -d onehealth -c "TRUNCATE sensors, telemetry, analysis_results;"
+
+# Esvaziar as filas do broker (ignora erro se não existirem):
+/opt/homebrew/opt/rabbitmq/sbin/rabbitmqctl purge_queue oh.gateway.5001 2>/dev/null || true
+/opt/homebrew/opt/rabbitmq/sbin/rabbitmqctl purge_queue oh.server.aggregated 2>/dev/null || true
+
+# Limpar PIDs órfãos se o kill_all não correu limpo:
+rm -f /tmp/onehealth-pids/*.pid
+===============================================================================

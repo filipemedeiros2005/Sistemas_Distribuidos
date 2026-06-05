@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package OneHealth.analysis;
+
+option csharp_namespace = "OneHealth.Grpc.Analysis";
+
+// Analysis service: executes statistical queries over the persisted
+// telemetry. Implemented in Python (pandas + scikit-learn).
+service AnalysisService {
+  // Runs an analysis described by `kind` over the given time window
+  // and filters, returning summary text, series points, and metrics.
+  rpc RunAnalysis (AnalysisRequest) returns (AnalysisResult);
+
+  // Returns the analysis kinds supported by the server
+  // (e.g. "AVG", "STDDEV", "ANOMALY_RATE", "FORECAST").
+  rpc ListAvailableAnalyses (Empty) returns (AvailableAnalyses);
+}
+
+message AnalysisRequest {
+  string kind              = 1;  // "AVG", "STDDEV", "ANOMALY_RATE", "FORECAST"
+  uint64 from_unix_ts      = 2;
+  uint64 to_unix_ts        = 3;
+  repeated string data_types = 4;  // empty means all
+  repeated uint32 sensor_ids = 5;  // resolved from ZONA by the Coordinator
+  map<string, string> options = 6; // analysis-specific options (e.g. {"HORIZON":"10"})
+}
+
+message AnalysisResult {
+  string kind             = 1;
+  string summary_text     = 2;  // human-readable summary for the UI
+  repeated SeriesPoint series = 3;  // points for chart rendering (FORECAST etc.)
+  map<string, double> metrics = 4;  // scalar metrics (e.g. {"slope": 1.5})
+  uint64 produced_unix_ts = 5;
+}
+
+message SeriesPoint {
+  uint64 ts    = 1;
+  double value = 2;
+  string label = 3;  // optional: groups points into named series in the chart
+}
+
+message Empty {}
+
+message AvailableAnalyses {
+  repeated string kinds = 1;
+}
